@@ -19,6 +19,7 @@ exports.getInvoicesList = async ({ garageId, search, paymentStatus, page = 1, li
   const invoices = await Invoice.find(query)
     .populate('customer', 'name phone')
     .populate('vehicle', 'licensePlate make model')
+    .populate('jobCard', 'jobCardNumber')
     .sort('-createdAt')
     .skip((page - 1) * limit)
     .limit(limit)
@@ -31,7 +32,8 @@ exports.getInvoiceDetails = async ({ invoiceId, garageId }) => {
   const invoice = await Invoice.findOne({ _id: invoiceId, garage: garageId })
     .populate('customer')
     .populate('vehicle')
-    .populate('jobCard')
+    .populate('jobCard', 'jobCardNumber status')
+    .populate('garage', 'name address phone email gstNumber')
     .populate('parts.inventoryItem', 'partName partNumber')
     .populate('createdBy', 'name')
     .lean();
@@ -105,9 +107,24 @@ exports.updatePaymentStatus = async ({ invoiceId, garageId, paymentData }) => {
     throw error;
   }
 
-  invoice.paymentStatus = paymentData.paymentStatus;
-  invoice.paymentMethod = paymentData.paymentMethod;
-  invoice.amountPaid = paymentData.amountPaid;
+  if (paymentData.paymentMethod) {
+    invoice.paymentMethod = paymentData.paymentMethod;
+  }
+
+  if (paymentData.amountPaid !== undefined) {
+    invoice.amountPaid = paymentData.amountPaid;
+  }
+
+  // Auto-detect status from amount if not explicitly set
+  if (paymentData.paymentStatus) {
+    invoice.paymentStatus = paymentData.paymentStatus;
+  } else if (invoice.amountPaid >= invoice.grandTotal) {
+    invoice.paymentStatus = 'paid';
+  } else if (invoice.amountPaid > 0) {
+    invoice.paymentStatus = 'partial';
+  } else {
+    invoice.paymentStatus = 'unpaid';
+  }
 
   if (invoice.paymentStatus === 'paid') {
     invoice.paidAt = new Date();

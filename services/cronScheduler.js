@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const ServiceReminder = require('../models/ServiceReminder');
 const Garage = require('../models/Garage');
 const { sendServiceReminder } = require('../services/emailService');
+const { sendServiceReminderSms, isSmsConfigured } = require('../services/smsService');
 const logger = require('../utils/logger');
 const log = logger.child('CronScheduler');
 
@@ -9,7 +10,7 @@ const log = logger.child('CronScheduler');
 // Job 1: Process Service Reminders
 // Runs every day at 9:00 AM server time
 // Finds all pending reminders due within the next 7 days
-// Sends email notifications and marks them as 'sent'
+// Sends email + SMS notifications and marks them as 'sent'
 // ───────────────────────────────────────────────
 const processServiceReminders = async () => {
   const jobStart = Date.now();
@@ -32,20 +33,22 @@ const processServiceReminders = async () => {
 
     if (dueReminders.length === 0) {
       log.info('Cron: No pending reminders found');
-      return { processed: 0, sent: 0, skipped: 0, failed: 0 };
+      return { processed: 0, emailSent: 0, smsSent: 0, skipped: 0, failed: 0 };
     }
 
     log.info(`Cron: Found ${dueReminders.length} reminders to process`);
 
-    let sent = 0;
+    let emailSent = 0;
+    let smsSent = 0;
     let skipped = 0;
     let failed = 0;
 
     for (const reminder of dueReminders) {
       try {
-        const result = await sendServiceReminder({
+        const reminderData = {
           customerName: reminder.customer?.name || 'Customer',
           customerEmail: reminder.customer?.email,
+          customerPhone: reminder.customer?.phone,
           vehiclePlate: reminder.vehicle?.licensePlate || 'Unknown',
           vehicleMake: reminder.vehicle?.make || '',
           vehicleModel: reminder.vehicle?.model || '',
@@ -53,36 +56,68 @@ const processServiceReminders = async () => {
           garagePhone: reminder.garage?.phone || '',
           nextServiceDate: reminder.nextServiceDate,
           reminderType: reminder.type
-        });
+        };
 
-        if (result.skipped) {
-          // No email for this customer — mark as sent anyway so we don't retry forever
+        let notesAppend = '';
+        let anySent = false;
+
+        // ── Send Email ──
+        try {
+          const emailResult = await sendServiceReminder(reminderData);
+          if (emailResult.skipped) {
+            notesAppend += `\n[Cron] Email skipped: ${emailResult.reason}`;
+          } else {
+            emailSent++;
+            anySent = true;
+            notesAppend += `\n[Cron] Email sent to ${reminder.customer?.email} at ${now.toISOString()}`;
+            if (emailResult.previewUrl) {
+              notesAppend += `\n[Ethereal Preview] ${emailResult.previewUrl}`;
+            }
+          }
+        } catch (emailErr) {
+          notesAppend += `\n[Cron] Email failed: ${emailErr.message}`;
+          log.warn('Email send failed for reminder', { reminderId: reminder._id, error: emailErr.message });
+        }
+
+        // ── Send SMS ──
+        try {
+          const smsResult = await sendServiceReminderSms(reminderData);
+          if (smsResult.skipped) {
+            notesAppend += `\n[Cron] SMS skipped: ${smsResult.reason}`;
+          } else if (smsResult.logged) {
+            notesAppend += '\n[Cron] SMS logged (Twilio not configured)';
+          } else {
+            smsSent++;
+            anySent = true;
+            notesAppend += `\n[Cron] SMS sent to ${reminder.customer?.phone} (SID: ${smsResult.sid})`;
+          }
+        } catch (smsErr) {
+          notesAppend += `\n[Cron] SMS failed: ${smsErr.message}`;
+          log.warn('SMS send failed for reminder', { reminderId: reminder._id, error: smsErr.message });
+        }
+
+        // ── Update reminder status ──
+        if (anySent) {
           await ServiceReminder.findByIdAndUpdate(reminder._id, {
             status: 'sent',
             reminderSentAt: now,
-            notes: (reminder.notes || '') + '\n[Cron] Skipped: no customer email'
+            notes: (reminder.notes || '') + notesAppend
           });
+
+          log.info('Cron: Reminder sent', {
+            reminderId: reminder._id,
+            customer: reminder.customer?.name,
+            vehicle: reminder.vehicle?.licensePlate,
+            email: emailSent > 0,
+            sms: smsSent > 0
+          });
+        } else {
+          // Neither email nor SMS succeeded — keep as pending for retry
           skipped++;
-          continue;
+          await ServiceReminder.findByIdAndUpdate(reminder._id, {
+            notes: (reminder.notes || '') + notesAppend
+          });
         }
-
-        // Successfully sent — update status
-        await ServiceReminder.findByIdAndUpdate(reminder._id, {
-          status: 'sent',
-          reminderSentAt: now,
-          notes: (reminder.notes || '') +
-            `\n[Cron] Email sent to ${reminder.customer?.email} at ${now.toISOString()}` +
-            (result.previewUrl ? `\n[Ethereal Preview] ${result.previewUrl}` : '')
-        });
-
-        sent++;
-
-        log.info('Cron: Reminder sent', {
-          reminderId: reminder._id,
-          customer: reminder.customer?.name,
-          vehicle: reminder.vehicle?.licensePlate,
-          previewUrl: result.previewUrl || null
-        });
       } catch (err) {
         failed++;
         log.error('Cron: Failed to process reminder', {
@@ -90,7 +125,6 @@ const processServiceReminders = async () => {
           error: err.message
         });
 
-        // Add error note but don't change status — will retry next run
         await ServiceReminder.findByIdAndUpdate(reminder._id, {
           notes: (reminder.notes || '') + `\n[Cron Error] ${now.toISOString()}: ${err.message}`
         });
@@ -100,13 +134,15 @@ const processServiceReminders = async () => {
     const duration = Date.now() - jobStart;
     log.info('Cron: Service reminder processing complete', {
       total: dueReminders.length,
-      sent,
+      emailSent,
+      smsSent,
       skipped,
       failed,
+      smsConfigured: isSmsConfigured(),
       durationMs: duration
     });
 
-    return { processed: dueReminders.length, sent, skipped, failed };
+    return { processed: dueReminders.length, emailSent, smsSent, skipped, failed };
   } catch (err) {
     log.error('Cron: Fatal error in reminder processing', { error: err.message, stack: err.stack });
     return { error: err.message };

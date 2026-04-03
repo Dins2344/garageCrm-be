@@ -14,6 +14,7 @@ const errorHandler = require('./middleware/errorHandler');
 const logger = require('./utils/logger');
 const { startScheduler } = require('./services/cronScheduler');
 const { initTransport } = require('./services/emailService');
+const { initSms } = require('./services/smsService');
 
 const log = logger.child('Server');
 
@@ -87,10 +88,11 @@ app.listen(PORT, () => {
     url: `http://localhost:${PORT}`
   });
 
-  // Initialize email transport and start cron scheduler
+  // Initialize notification services and start cron scheduler
+  initSms();
   initTransport().then(() => {
     startScheduler();
-    log.info('Cron scheduler and email service initialized');
+    log.info('Cron scheduler, email & SMS services initialized');
   }).catch(err => {
     log.warn('Email transport init failed, cron will still run but emails may not send', { error: err.message });
     startScheduler();
