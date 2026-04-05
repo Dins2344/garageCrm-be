@@ -78,7 +78,8 @@ exports.deleteInvoice = async (req, res, next) => {
   try {
     await invoiceUsecase.removeInvoice({
       invoiceId: req.params.id,
-      garageId: req.user.garage._id
+      garageId: req.user.garage._id,
+      userId: req.user._id
     });
     res.status(200).json({ success: true, message: 'Invoice deleted successfully' });
   } catch (error) {

@@ -1,4 +1,6 @@
 const jobCardUsecase = require('../usecases/jobCardUsecase');
+const pdfService = require('../services/pdfService');
+const Garage = require('../models/Garage');
 const logger = require('../utils/logger');
 const log = logger.child('JobCardController');
 
@@ -126,6 +128,29 @@ exports.deleteJobCard = async (req, res, next) => {
     });
 
     res.status(200).json({ success: true, message: 'Job card deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+// @desc    Download estimation as PDF
+// @route   GET /api/jobcards/:id/estimation/download
+exports.downloadEstimation = async (req, res, next) => {
+  try {
+    const jobCard = await jobCardUsecase.getJobCardDetails({
+      jobCardId: req.params.id,
+      garageId: req.user.garage._id
+    });
+
+    const garage = await Garage.findById(req.user.garage._id).lean();
+
+    const pdfBuffer = await pdfService.generateEstimationPDF(jobCard, garage);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="Estimation-${jobCard.jobCardNumber}.pdf"`,
+      'Content-Length': pdfBuffer.length
+    });
+    res.send(pdfBuffer);
   } catch (error) {
     next(error);
   }

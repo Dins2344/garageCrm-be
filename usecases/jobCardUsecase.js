@@ -83,6 +83,12 @@ exports.updateJobCardProgress = async ({ jobCardId, garageId, userId, updateData
 
   // Handle status transition logic
   if (updateData.status && updateData.status !== jobCard.status) {
+    if (jobCard.status === 'cancelled') {
+      const err = new Error('Cancelled job card cannot be reopened.');
+      err.statusCode = 400;
+      throw err;
+    }
+
     if (!updateData.statusHistory) {
       updateData.statusHistory = [...jobCard.statusHistory];
     }
@@ -134,6 +140,12 @@ exports.calculateAndSaveEstimation = async ({ jobCardId, garageId, estimationDat
   const actualTaxRate = taxRate !== undefined ? taxRate : jobCard.estimation.taxRate;
   const taxAmount = ((subtotal - discount) * actualTaxRate) / 100;
   const grandTotal = subtotal - discount + taxAmount;
+
+  if (jobCard.invoice) {
+    const error = new Error('Cannot edit estimation after invoice generation. Please reopen the job card first.');
+    error.statusCode = 400;
+    throw error;
+  }
 
   jobCard.estimation = {
     parts: calculatedParts,

@@ -38,6 +38,11 @@ const jobCardSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
+  assignedAdvisor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
   // Job card status flow
   status: {
     type: String,

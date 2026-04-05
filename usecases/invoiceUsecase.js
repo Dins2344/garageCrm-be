@@ -139,12 +139,36 @@ exports.updatePaymentStatus = async ({ invoiceId, garageId, paymentData }) => {
   return invoice;
 };
 
-exports.removeInvoice = async ({ invoiceId, garageId }) => {
-  const invoice = await Invoice.findOneAndDelete({ _id: invoiceId, garage: garageId });
+exports.removeInvoice = async ({ invoiceId, garageId, userId }) => {
+  const invoice = await Invoice.findOne({ _id: invoiceId, garage: garageId });
+  
   if (!invoice) {
     const error = new Error('Invoice not found');
     error.statusCode = 404;
     throw error;
   }
+
+  // 1. Restore inventory stock
+  log.info('Restoring inventory stock for cancelled invoice', { invoiceId });
+  const stockRestoration = invoice.parts
+    .filter(p => p.inventoryItem)
+    .map(p => Inventory.findByIdAndUpdate(p.inventoryItem, { $inc: { quantity: p.quantity } }));
+  await Promise.all(stockRestoration);
+
+  // 2. Clear reference from JobCard and Reopen it
+  const jobCard = await JobCard.findById(invoice.jobCard);
+  if (jobCard) {
+    jobCard.invoice = null;
+    jobCard.status = 'approved'; // Revert to approved state so it can be edited/moved
+    jobCard.statusHistory.push({
+      status: 'approved',
+      changedBy: userId,
+      notes: `Invoice ${invoice.invoiceNumber} cancelled. Job reopened for editing.`
+    });
+    await jobCard.save();
+    log.info('Job card reopened after invoice cancellation', { jobCardId: jobCard._id });
+  }
+
+  await Invoice.findByIdAndDelete(invoiceId);
   return true;
 };

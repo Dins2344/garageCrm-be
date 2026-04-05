@@ -7,12 +7,15 @@ const {
   updateJobCard,
   updateEstimation,
   approveEstimation,
-  deleteJobCard
+  deleteJobCard,
+  downloadEstimation
 } = require('../controllers/jobCardController');
 const { protect, authorize } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 
 router.use(protect);
+
+router.get('/:id/estimation/download', authorize('owner', 'admin', 'service_advisor', 'receptionist'), asyncHandler(downloadEstimation));
 
 router.route('/')
   .get(asyncHandler(getJobCards))
