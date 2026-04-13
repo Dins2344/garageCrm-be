@@ -62,7 +62,7 @@ exports.autoCreateFromDelivery = async ({ jobCard, garageId }) => {
     customer: jobCard.customer?._id || jobCard.customer,
     garage: garageId,
     jobCard: jobCard._id,
-    type: 'periodic_service',
+    type: jobCard.serviceType,
     nextServiceDate,
     notes: `Auto-created after Job Card ${jobCard.jobCardNumber} delivery`
   });

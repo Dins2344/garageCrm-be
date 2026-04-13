@@ -1,6 +1,9 @@
 const JobCard = require('../models/JobCard');
 const Vehicle = require('../models/Vehicle');
 const reminderUsecase = require('./reminderUsecase');
+const { sendEstimationEmail } = require('../services/emailService');
+const Garage = require('../models/Garage');
+const { randomUUID } = require('crypto');
 const logger = require('../utils/logger');
 const log = logger.child('JobCardUsecase');
 
@@ -35,9 +38,11 @@ exports.getJobCardDetails = async ({ jobCardId, garageId }) => {
     .populate('vehicle')
     .populate('customer')
     .populate('assignedMechanic', 'name phone')
+    .populate('assignedAdvisor', 'name phone')
     .populate('createdBy', 'name')
     .populate('estimation.parts.inventoryItem', 'partName partNumber')
     .populate('invoice')
+    .populate('statusHistory.changedBy', 'name')
     .lean();
 
   if (!jobCard) {
@@ -103,10 +108,53 @@ exports.updateJobCardProgress = async ({ jobCardId, garageId, userId, updateData
     }
   }
 
+  // Generate a one-time estimation approval token when sending to customer
+  if (updateData.status === 'estimation_sent') {
+    const hasParts = jobCard.estimation?.parts?.length > 0;
+    const hasLabor = jobCard.estimation?.labor?.length > 0;
+
+    if (!hasParts && !hasLabor) {
+      const err = new Error('Cannot send estimation without any parts or labor items.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    updateData.estimationToken = randomUUID();
+    updateData['estimation.sentAt'] = new Date();
+  }
+
   jobCard = await JobCard.findByIdAndUpdate(jobCardId, updateData, {
     new: true,
     runValidators: true
   }).populate('vehicle customer assignedMechanic createdBy');
+
+  // Fire-and-forget: send estimation approval email
+  if (updateData.status === 'estimation_sent') {
+    (async () => {
+      try {
+        const garage = await Garage.findById(garageId).lean();
+        const frontendUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+        const approvalLink = `${frontendUrl}/estimate/${updateData.estimationToken}`;
+        await sendEstimationEmail({
+          customerName: jobCard.customer?.name || 'Customer',
+          customerEmail: jobCard.customer?.email,
+          vehiclePlate: jobCard.vehicle?.licensePlate || '',
+          vehicleMake: jobCard.vehicle?.make || '',
+          vehicleModel: jobCard.vehicle?.model || '',
+          jobCardNumber: jobCard.jobCardNumber,
+          complaints: jobCard.complaints || [],
+          grandTotal: jobCard.estimation?.grandTotal || 0,
+          garageName: garage?.name || 'GarageFlow',
+          garagePhone: garage?.phone || '',
+          approvalLink
+        });
+        log.info('Estimation email sent', { jobCardId, to: jobCard.customer?.email });
+      } catch (emailErr) {
+        // Never let email failure block the response
+        log.warn('Failed to send estimation email', { jobCardId, error: emailErr.message });
+      }
+    })();
+  }
 
   // Side effect: auto-create service reminder on delivery
   if (updateData.status === 'delivered') {
@@ -173,7 +221,7 @@ exports.approveJobEstimation = async ({ jobCardId, garageId, userId }) => {
 
   jobCard.estimation.approvedByCustomer = true;
   jobCard.estimation.approvedAt = new Date();
-  jobCard.status = 'approved';
+  jobCard.status = jobCard.status === 'estimation_sent' ? 'approved' : jobCard.status;
   jobCard.statusHistory.push({
     status: 'approved',
     changedBy: userId,

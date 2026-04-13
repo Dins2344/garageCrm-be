@@ -70,6 +70,7 @@ app.use('/api/inventory', require('./routes/inventory'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/reminders', require('./routes/reminders'));
+app.use('/api/public', require('./routes/public')); // No auth — token-secured
 
 // Health check
 app.get('/api/health', (req, res) => {

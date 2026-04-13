@@ -1,6 +1,7 @@
 const Invoice = require('../models/Invoice');
 const JobCard = require('../models/JobCard');
 const Inventory = require('../models/Inventory');
+const reminderUsecase = require('./reminderUsecase');
 const logger = require('../utils/logger');
 const log = logger.child('InvoiceUsecase');
 
@@ -83,16 +84,23 @@ exports.generateInvoiceFromJobCard = async ({ jobCardId, garageId, userId }) => 
   });
   await jobCard.save();
 
+  // side effect 3: creating reminder for the delivered vehicle.
+  try {
+    await reminderUsecase.autoCreateFromDelivery({ jobCard, garageId });
+  } catch (reminderErr) {
+    log.warn('Failed to auto-create service reminder', { error: reminderErr.message, jobCardId });
+  }
+
   // side effect 2: deduct inventory stock
-  const stockAdjustments = jobCard.estimation.parts.map(p => 
+  const stockAdjustments = jobCard.estimation.parts.map(p =>
     Inventory.findByIdAndUpdate(p.inventoryItem, { $inc: { quantity: -p.quantity } })
   );
   await Promise.all(stockAdjustments);
 
-  log.info('New invoice generated', { 
-    invoiceId: invoice._id, 
-    invoiceNumber: invoice.invoiceNumber, 
-    jobCardId: jobCard._id 
+  log.info('New invoice generated', {
+    invoiceId: invoice._id,
+    invoiceNumber: invoice.invoiceNumber,
+    jobCardId: jobCard._id
   });
 
   return invoice;
@@ -131,17 +139,17 @@ exports.updatePaymentStatus = async ({ invoiceId, garageId, paymentData }) => {
   }
 
   await invoice.save();
-  log.info('Payment status updated', { 
-    invoiceId, 
-    newStatus: invoice.paymentStatus, 
-    amount: invoice.amountPaid 
+  log.info('Payment status updated', {
+    invoiceId,
+    newStatus: invoice.paymentStatus,
+    amount: invoice.amountPaid
   });
   return invoice;
 };
 
 exports.removeInvoice = async ({ invoiceId, garageId, userId }) => {
   const invoice = await Invoice.findOne({ _id: invoiceId, garage: garageId });
-  
+
   if (!invoice) {
     const error = new Error('Invoice not found');
     error.statusCode = 404;
