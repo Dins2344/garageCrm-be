@@ -25,7 +25,7 @@ const app = express();
 
 // 1. CORS — Always at the very top to handle preflights correctly
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: process.env.CLIENT_URL || 'http://localhost:3000',
   credentials: true
 }));
 
@@ -70,6 +70,7 @@ app.use('/api/inventory', require('./routes/inventory'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/reminders', require('./routes/reminders'));
+app.use('/api/garage', require('./routes/garage'));
 app.use('/api/public', require('./routes/public')); // No auth — token-secured
 
 // Health check
