@@ -61,12 +61,13 @@ jobs:
           command_timeout: 10m
           script: |
             set -e
+            IMGNAME="${{ secrets.DOCKERHUB_USERNAME }}/garageflow-api"
 
             echo "🔐 Logging into Docker Hub..."
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
             echo "📥 Pulling latest image..."
-            docker pull ${{ env.DOCKER_IMAGE }}:latest
+            docker pull "$IMGNAME:latest"
 
             echo "📂 Moving to project directory..."
             cd ~/garageflow
@@ -75,7 +76,7 @@ jobs:
             docker compose down --remove-orphans || true
 
             echo "🚀 Starting new containers..."
-            export DOCKER_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/garageflow-api"
+            export DOCKER_IMAGE="$IMGNAME"
             docker compose up -d
 
             echo "⏳ Waiting for health check..."
