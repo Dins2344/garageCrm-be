@@ -52,6 +52,10 @@ jobs:
 
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.2.1
+        env:
+          DOCKER_IMG: ${{ secrets.DOCKERHUB_USERNAME }}/garageflow-api
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
@@ -59,14 +63,15 @@ jobs:
           port: 22
           timeout: 60s
           command_timeout: 10m
+          envs: DOCKER_IMG,DH_USER,DH_TOKEN
           script: |
             set -e
 
             echo "🔐 Logging into Docker Hub..."
-            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            echo "$DH_TOKEN" | docker login -u "$DH_USER" --password-stdin
 
             echo "📥 Pulling latest image..."
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/garageflow-api:latest
+            docker pull "${DOCKER_IMG}:latest"
 
             echo "📂 Moving to project directory..."
             cd ~/garageflow
@@ -75,7 +80,7 @@ jobs:
             docker compose down --remove-orphans || true
 
             echo "🚀 Starting new containers..."
-            DOCKER_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/garageflow-api docker compose up -d
+            DOCKER_IMAGE="${DOCKER_IMG}" docker compose up -d
 
             echo "⏳ Waiting for health check..."
             sleep 10
