@@ -2,9 +2,7 @@ version: "3.8"
 
 services:
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DOCKER_IMAGE:-garageflow-api:latest}
     container_name: garageflow-api
     restart: unless-stopped
     ports:
