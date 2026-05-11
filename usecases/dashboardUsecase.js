@@ -30,7 +30,8 @@ exports.compileStats = async ({ garageId }) => {
     lowStockItems,
     recentJobCards,
     recentInvoices,
-    upcomingReminders
+    upcomingReminders,
+    staffAchievement
   ] = await Promise.all([
     Customer.countDocuments({ garage: garageId }),
     Vehicle.countDocuments({ garage: garageId }),
@@ -80,7 +81,39 @@ exports.compileStats = async ({ garageId }) => {
       .populate('customer', 'name phone')
       .sort('nextServiceDate')
       .limit(10)
-      .lean()
+      .lean(),
+    JobCard.aggregate([
+      { $match: { 
+          garage: garageId, 
+          status: { $nin: ['cancelled'] }, 
+          createdAt: { $gte: monthStart } 
+      }},
+      { $group: {
+          _id: "$assignedMechanic",
+          totalLaborValue: { $sum: { $sum: { $map: { 
+              input: "$estimation.labor", 
+              as: "l", 
+              in: { $multiply: ["$$l.hours", "$$l.ratePerHour"] } 
+          }}}},
+          jobCount: { $sum: 1 }
+      }},
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'staff'
+        }
+      },
+      { $unwind: { path: "$staff", preserveNullAndEmptyArrays: true } },
+      { $project: {
+          staffName: { $ifNull: ["$staff.name", "Unassigned"] },
+          role: { $ifNull: ["$staff.role", "mechanic"] },
+          totalLabor: "$totalLaborValue",
+          jobCount: "$jobCount"
+      }},
+      { $sort: { totalLabor: -1 } }
+    ])
   ]);
 
   const queryTime = Date.now() - startTime;
@@ -113,6 +146,7 @@ exports.compileStats = async ({ garageId }) => {
       ...r,
       isOverdue: new Date(r.nextServiceDate) < new Date()
     })),
+    staffAchievement,
     queryTimeMs: queryTime
   };
 };

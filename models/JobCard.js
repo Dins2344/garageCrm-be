@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const jobCardSchema = new mongoose.Schema({
+  serviceType: {
+    type: String,
+    enum: ['service', 'repair', 'accident'],
+    required: true
+  },
   jobCardNumber: {
     type: String,
     required: true
@@ -34,6 +39,11 @@ const jobCardSchema = new mongoose.Schema({
   }],
   // Mechanic assignment
   assignedMechanic: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  assignedAdvisor: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null
@@ -113,6 +123,11 @@ const jobCardSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
+  },
+  // Token used in the customer-facing estimation approval link
+  estimationToken: {
+    type: String,
+    default: null
   }
 }, {
   timestamps: true

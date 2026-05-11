@@ -215,8 +215,120 @@ const sendServiceReminder = async ({ customerName, customerEmail, vehiclePlate, 
   return sendEmail({ to: customerEmail, subject, html, text });
 };
 
+// ───── Estimation Approval Email ─────
+const sendEstimationEmail = async ({
+  customerName,
+  customerEmail,
+  vehiclePlate,
+  vehicleMake,
+  vehicleModel,
+  jobCardNumber,
+  complaints,
+  grandTotal,
+  garageName,
+  garagePhone,
+  approvalLink
+}) => {
+  if (!customerEmail) {
+    log.info('Skipping estimation email — no customer email', { customerName, vehiclePlate });
+    return { skipped: true, reason: 'no_email' };
+  }
+
+  const subject = `Estimation Ready — ${vehiclePlate} | ${garageName}`;
+
+  const complaintsHtml = complaints
+    .map(c => `<li style="margin-bottom:6px;color:#475569;">${c.description}</li>`)
+    .join('');
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:32px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.07);">
+    <!-- Header -->
+    <tr>
+      <td style="background:linear-gradient(135deg,#3b5ff8,#7c3aed);padding:36px 40px;text-align:center;">
+        <p style="color:rgba(255,255,255,0.75);margin:0 0 6px;font-size:13px;letter-spacing:0.06em;text-transform:uppercase;">Service Estimation</p>
+        <h1 style="color:#ffffff;margin:0;font-size:26px;font-weight:700;">${garageName}</h1>
+      </td>
+    </tr>
+    <!-- Body -->
+    <tr>
+      <td style="padding:36px 40px;">
+        <p style="font-size:16px;color:#1e293b;margin:0 0 8px;">Hi <strong>${customerName}</strong>,</p>
+        <p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 28px;">
+          We have prepared an estimation for your vehicle. Please review the details below and click the button to approve so we can begin work.
+        </p>
+
+        <!-- Job Card -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;border-radius:10px;margin-bottom:24px;">
+          <tr><td style="padding:20px 24px;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="width:50%;padding:4px 0;">
+                  <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Vehicle</span><br/>
+                  <span style="font-size:17px;font-weight:700;color:#1e293b;">${vehiclePlate}</span>
+                </td>
+                <td style="width:50%;padding:4px 0;">
+                  <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Make / Model</span><br/>
+                  <span style="font-size:14px;color:#334155;">${vehicleMake} ${vehicleModel}</span>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="2" style="padding:12px 0 0;">
+                  <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Job Card</span><br/>
+                  <span style="font-size:14px;font-weight:600;color:#3b5ff8;">${jobCardNumber}</span>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+        </table>
+
+        <!-- Complaints -->
+        <p style="font-size:13px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin:0 0 10px;">Service Requests</p>
+        <ul style="margin:0 0 24px;padding-left:20px;">${complaintsHtml}</ul>
+
+        <!-- Total -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;margin-bottom:32px;">
+          <tr><td style="padding:18px 24px;">
+            <span style="font-size:13px;color:#1d4ed8;">Estimated Total</span>
+            <span style="float:right;font-size:22px;font-weight:800;color:#1d4ed8;">&#8377;${grandTotal.toLocaleString('en-IN')}</span>
+          </td></tr>
+        </table>
+
+        <!-- CTA -->
+        <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
+          <tr>
+            <td style="background:linear-gradient(135deg,#3b5ff8,#7c3aed);border-radius:10px;">
+              <a href="${approvalLink}" style="display:inline-block;padding:16px 48px;color:#ffffff;font-weight:700;font-size:16px;text-decoration:none;letter-spacing:0.02em;">Review &amp; Approve Estimation</a>
+            </td>
+          </tr>
+        </table>
+
+        <p style="font-size:13px;color:#94a3b8;text-align:center;margin:0;">Or paste this link in your browser:<br/>
+          <a href="${approvalLink}" style="color:#3b5ff8;word-break:break-all;">${approvalLink}</a>
+        </p>
+      </td>
+    </tr>
+    <!-- Footer -->
+    <tr>
+      <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+        <p style="font-size:12px;color:#94a3b8;margin:0;">Questions? Call us at <strong>${garagePhone}</strong><br/>Sent by ${garageName} via GarageFlow CRM</p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const text = `Hi ${customerName},\n\nWe have prepared an estimation for your vehicle ${vehiclePlate} (${vehicleMake} ${vehicleModel}).\n\nJob Card: ${jobCardNumber}\nEstimated Total: Rs.${grandTotal}\n\nPlease review and approve here:\n${approvalLink}\n\nQuestions? Call ${garageName} at ${garagePhone}.`;
+
+  return sendEmail({ to: customerEmail, subject, html, text });
+};
+
 module.exports = {
   initTransport,
   sendEmail,
-  sendServiceReminder
+  sendServiceReminder,
+  sendEstimationEmail
 };

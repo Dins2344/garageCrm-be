@@ -19,7 +19,7 @@ router.route('/')
 
 router.route('/:id')
   .get(asyncHandler(getInvoice))
-  .delete(authorize('owner'), asyncHandler(deleteInvoice));
+  .delete(authorize('owner', 'admin'), asyncHandler(deleteInvoice));
 
 router.get('/:id/pdf', asyncHandler(downloadInvoicePDF));
 router.put('/:id/payment', authorize('owner', 'admin', 'service_advisor'), asyncHandler(updatePaymentStatus));
