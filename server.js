@@ -74,8 +74,46 @@ app.use('/api/garage', require('./routes/garage'));
 app.use('/api/public', require('./routes/public')); // No auth — token-secured
 
 // Health check
-app.get('/api/health', (req, res) => {
-  res.json({ success: true, message: 'GarageFlow API is running', timestamp: new Date() });
+app.get('/api/health', async (req, res) => {
+  const os = require('os');
+  const mongoose = require('mongoose');
+
+  const memUsage = process.memoryUsage();
+  const formatMB = (bytes) => (bytes / 1024 / 1024).toFixed(2) + ' MB';
+
+  const dbStates = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+
+  res.json({
+    success: true,
+    message: 'GarageFlow API is running',
+    timestamp: new Date(),
+    uptime: {
+      process: Math.floor(process.uptime()) + 's',
+      system: Math.floor(os.uptime()) + 's'
+    },
+    memory: {
+      heapUsed: formatMB(memUsage.heapUsed),
+      heapTotal: formatMB(memUsage.heapTotal),
+      rss: formatMB(memUsage.rss),
+      systemTotal: formatMB(os.totalmem()),
+      systemFree: formatMB(os.freemem())
+    },
+    cpu: {
+      cores: os.cpus().length,
+      model: os.cpus()[0]?.model,
+      loadAvg: os.loadavg().map(l => l.toFixed(2))
+    },
+    platform: {
+      node: process.version,
+      os: `${os.type()} ${os.release()}`,
+      arch: os.arch()
+    },
+    database: {
+      status: dbStates[mongoose.connection.readyState] || 'unknown',
+      host: mongoose.connection.host || 'N/A'
+    },
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 // Error handler
