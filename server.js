@@ -83,6 +83,7 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/reminders', require('./routes/reminders'));
 app.use('/api/garage', require('./routes/garage'));
 app.use('/api/public', require('./routes/public')); // No auth — token-secured
+app.use('/api/admin', require('./routes/admin'));   // Platform-wide admin
 
 // Health check
 app.get('/api/health', async (req, res) => {
