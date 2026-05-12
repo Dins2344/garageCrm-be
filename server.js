@@ -15,6 +15,8 @@ const logger = require('./utils/logger');
 const { startScheduler } = require('./services/cronScheduler');
 const { initTransport } = require('./services/emailService');
 const { initSms } = require('./services/smsService');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./config/swagger');
 
 const log = logger.child('Server');
 
@@ -59,6 +61,13 @@ app.use(morgan(':method :url :status :response-time ms - :res[content-length]', 
 
 // Static files (for uploaded photos)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Swagger API Documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'GarageFlow API Docs'
+}));
+app.get('/api-docs.json', (req, res) => res.json(swaggerSpec));
 
 // API Routes
 app.use('/api/auth', require('./routes/auth'));
