@@ -25,6 +25,13 @@ connectDB();
 
 const app = express();
 
+// ── Swagger API Documentation (mounted before helmet to avoid CSP issues) ──
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'GarageFlow API Docs'
+}));
+app.get('/api-docs.json', (req, res) => res.json(swaggerSpec));
+
 // 1. CORS — Always at the very top to handle preflights correctly
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:3000',
@@ -62,12 +69,7 @@ app.use(morgan(':method :url :status :response-time ms - :res[content-length]', 
 // Static files (for uploaded photos)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Swagger API Documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: 'GarageFlow API Docs'
-}));
-app.get('/api-docs.json', (req, res) => res.json(swaggerSpec));
+
 
 // API Routes
 app.use('/api/auth', require('./routes/auth'));
