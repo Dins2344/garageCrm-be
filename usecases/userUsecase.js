@@ -3,11 +3,14 @@ const logger = require('../utils/logger');
 const log = logger.child('UserUsecase');
 
 exports.getStaffList = async ({ garageId }) => {
+  log.info('Fetching staff list', { garageId });
   const users = await User.find({ garage: garageId }).lean();
+  log.info('Staff list fetched', { garageId, count: users.length });
   return users;
 };
 
 exports.registerStaff = async ({ staffData, garageId }) => {
+  log.info('Registering new staff member', { garageId, role: staffData.role, email: staffData.email });
   staffData.garage = garageId;
   const user = await User.create(staffData);
   log.info('New staff registered', { userId: user._id, role: user.role, garageId });
@@ -15,6 +18,7 @@ exports.registerStaff = async ({ staffData, garageId }) => {
 };
 
 exports.updateStaffDetails = async ({ staffId, garageId, updateData }) => {
+  log.info('Updating staff details', { staffId, garageId, fields: Object.keys(updateData) });
   const user = await User.findOneAndUpdate(
     { _id: staffId, garage: garageId },
     updateData,
@@ -22,18 +26,22 @@ exports.updateStaffDetails = async ({ staffId, garageId, updateData }) => {
   );
 
   if (!user) {
+    log.warn('Staff member not found for update', { staffId, garageId });
     const error = new Error('User not found');
     error.statusCode = 404;
     throw error;
   }
 
+  log.info('Staff details updated', { staffId });
   return user;
 };
 
 exports.deactivateStaff = async ({ staffId, garageId, action }) => {
+  log.info('Toggling staff account status', { staffId, garageId, action });
   const user = await User.findOne({ _id: staffId, garage: garageId });
 
   if (!user) {
+    log.warn('Staff member not found for status toggle', { staffId, garageId });
     const error = new Error('User not found');
     error.statusCode = 404;
     throw error;
@@ -47,11 +55,14 @@ exports.deactivateStaff = async ({ staffId, garageId, action }) => {
 };
 
 exports.removeStaff = async ({ staffId, garageId }) => {
+  log.info('Removing staff member', { staffId, garageId });
   const user = await User.findOneAndDelete({ _id: staffId, garage: garageId });
   if (!user) {
+    log.warn('Staff member not found for deletion', { staffId, garageId });
     const error = new Error('User not found');
     error.statusCode = 404;
     throw error;
   }
+  log.info('Staff member removed', { staffId, garageId });
   return true;
 };

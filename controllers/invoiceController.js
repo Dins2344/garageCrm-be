@@ -1,6 +1,4 @@
 const invoiceUsecase = require('../usecases/invoiceUsecase');
-const pdfService = require('../services/pdfService');
-const Garage = require('../models/Garage');
 const logger = require('../utils/logger');
 const log = logger.child('InvoiceController');
 
@@ -9,14 +7,18 @@ const log = logger.child('InvoiceController');
 exports.getInvoices = async (req, res, next) => {
   try {
     const { search, paymentStatus, page, limit } = req.query;
+    const garageId = req.user.garage._id;
+    log.info('Fetching invoices list', { garageId, search, paymentStatus, page, limit });
+
     const { invoices, total } = await invoiceUsecase.getInvoicesList({
-      garageId: req.user.garage._id,
+      garageId,
       search,
       paymentStatus,
       page,
       limit
     });
 
+    log.info('Invoices list fetched', { garageId, count: invoices.length, total });
     res.status(200).json({
       success: true,
       count: invoices.length,
@@ -24,6 +26,7 @@ exports.getInvoices = async (req, res, next) => {
       data: invoices
     });
   } catch (error) {
+    log.error('Failed to fetch invoices', { garageId: req.user?.garage?._id, error: error.message });
     next(error);
   }
 };
@@ -32,12 +35,15 @@ exports.getInvoices = async (req, res, next) => {
 // @route   GET /api/invoices/:id
 exports.getInvoice = async (req, res, next) => {
   try {
-    const invoice = await invoiceUsecase.getInvoiceDetails({
-      invoiceId: req.params.id,
-      garageId: req.user.garage._id
-    });
+    const { id } = req.params;
+    const garageId = req.user.garage._id;
+    log.info('Fetching single invoice', { invoiceId: id, garageId });
+
+    const invoice = await invoiceUsecase.getInvoiceDetails({ invoiceId: id, garageId });
+    log.info('Invoice fetched successfully', { invoiceId: id, invoiceNumber: invoice.invoiceNumber });
     res.status(200).json({ success: true, data: invoice });
   } catch (error) {
+    log.error('Failed to fetch invoice', { invoiceId: req.params.id, error: error.message });
     next(error);
   }
 };
@@ -46,13 +52,20 @@ exports.getInvoice = async (req, res, next) => {
 // @route   POST /api/invoices
 exports.createInvoice = async (req, res, next) => {
   try {
+    const garageId = req.user.garage._id;
+    const { jobCardId } = req.body;
+    log.info('Creating invoice from job card', { garageId, jobCardId, userId: req.user._id });
+
     const invoice = await invoiceUsecase.generateInvoiceFromJobCard({
-      jobCardId: req.body.jobCardId,
-      garageId: req.user.garage._id,
+      jobCardId,
+      garageId,
       userId: req.user._id
     });
+
+    log.info('Invoice created successfully', { invoiceId: invoice._id, invoiceNumber: invoice.invoiceNumber, garageId });
     res.status(201).json({ success: true, data: invoice });
   } catch (error) {
+    log.error('Failed to create invoice', { garageId: req.user?.garage?._id, error: error.message });
     next(error);
   }
 };
@@ -61,13 +74,20 @@ exports.createInvoice = async (req, res, next) => {
 // @route   PUT /api/invoices/:id/payment
 exports.updatePaymentStatus = async (req, res, next) => {
   try {
+    const { id } = req.params;
+    const garageId = req.user.garage._id;
+    log.info('Updating invoice payment status', { invoiceId: id, garageId, paymentData: req.body });
+
     const invoice = await invoiceUsecase.updatePaymentStatus({
-      invoiceId: req.params.id,
-      garageId: req.user.garage._id,
+      invoiceId: id,
+      garageId,
       paymentData: req.body
     });
+
+    log.info('Invoice payment status updated', { invoiceId: id, newStatus: invoice.paymentStatus, amountPaid: invoice.amountPaid });
     res.status(200).json({ success: true, data: invoice });
   } catch (error) {
+    log.error('Failed to update payment status', { invoiceId: req.params.id, error: error.message });
     next(error);
   }
 };
@@ -76,13 +96,20 @@ exports.updatePaymentStatus = async (req, res, next) => {
 // @route   DELETE /api/invoices/:id
 exports.deleteInvoice = async (req, res, next) => {
   try {
+    const { id } = req.params;
+    const garageId = req.user.garage._id;
+    log.info('Deleting invoice', { invoiceId: id, garageId, userId: req.user._id });
+
     await invoiceUsecase.removeInvoice({
-      invoiceId: req.params.id,
-      garageId: req.user.garage._id,
+      invoiceId: id,
+      garageId,
       userId: req.user._id
     });
+
+    log.info('Invoice deleted', { invoiceId: id, garageId });
     res.status(200).json({ success: true, message: 'Invoice deleted successfully' });
   } catch (error) {
+    log.error('Failed to delete invoice', { invoiceId: req.params.id, error: error.message });
     next(error);
   }
 };
@@ -91,23 +118,24 @@ exports.deleteInvoice = async (req, res, next) => {
 // @route   GET /api/invoices/:id/pdf
 exports.downloadInvoicePDF = async (req, res, next) => {
   try {
-    const invoice = await invoiceUsecase.getInvoiceDetails({
-      invoiceId: req.params.id,
-      garageId: req.user.garage._id
+    const { id } = req.params;
+    const garageId = req.user.garage._id;
+    log.info('Invoice PDF download requested', { invoiceId: id, garageId, userId: req.user._id });
+
+    const { buffer, invoiceNumber } = await invoiceUsecase.generateInvoicePDFBuffer({
+      invoiceId: id,
+      garageId
     });
 
-    const garage = await Garage.findById(req.user.garage._id).lean();
-
-    const pdfBuffer = await pdfService.generateInvoicePDF(invoice, garage);
-
+    log.info('Streaming invoice PDF to client', { invoiceId: id, invoiceNumber, bytes: buffer.length });
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${invoice.invoiceNumber || 'invoice'}.pdf"`,
-      'Content-Length': pdfBuffer.length
+      'Content-Disposition': `attachment; filename="${invoiceNumber || 'invoice'}.pdf"`,
+      'Content-Length': buffer.length
     });
-    res.send(pdfBuffer);
+    res.send(buffer);
   } catch (error) {
+    log.error('Failed to generate invoice PDF', { invoiceId: req.params.id, error: error.message });
     next(error);
   }
 };
-

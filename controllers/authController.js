@@ -23,9 +23,12 @@ const sendTokenResponse = (user, statusCode, res) => {
 // @route   POST /api/auth/register
 exports.register = async (req, res, next) => {
   try {
+    log.info('New garage registration attempt', { email: req.body.email, garageName: req.body.garageName });
     const { user } = await authUsecase.registerNewGarage(req.body);
+    log.info('New garage registered successfully', { userId: user._id, garageId: user.garage });
     sendTokenResponse(user, 201, res);
   } catch (error) {
+    log.error('Garage registration failed', { email: req.body.email, error: error.message });
     next(error);
   }
 };
@@ -34,12 +37,15 @@ exports.register = async (req, res, next) => {
 // @route   POST /api/auth/login
 exports.login = async (req, res, next) => {
   try {
-    const { user } = await authUsecase.authenticateUser({ 
-      email: req.body.email, 
-      password: req.body.password 
+    log.info('Login attempt', { email: req.body.email, ip: req.ip });
+    const { user } = await authUsecase.authenticateUser({
+      email: req.body.email,
+      password: req.body.password
     });
+    log.info('Login successful', { userId: user._id, role: user.role });
     sendTokenResponse(user, 200, res);
   } catch (error) {
+    log.warn('Login failed', { email: req.body.email, error: error.message });
     next(error);
   }
 };
@@ -48,9 +54,11 @@ exports.login = async (req, res, next) => {
 // @route   GET /api/auth/me
 exports.getMe = async (req, res, next) => {
   try {
+    log.info('Me request', { userId: req.user._id, role: req.user.role });
     // req.user is already populated by auth middleware
     res.status(200).json({ success: true, data: req.user });
   } catch (error) {
+    log.error('Failed to get current user', { error: error.message });
     next(error);
   }
 };
@@ -59,6 +67,7 @@ exports.getMe = async (req, res, next) => {
 // @route   PUT /api/auth/profile
 exports.updateProfile = async (req, res, next) => {
   try {
+    log.info('Profile update request', { userId: req.user._id });
     const fieldsToUpdate = {
       name: req.body.name,
       phone: req.body.phone
@@ -74,8 +83,10 @@ exports.updateProfile = async (req, res, next) => {
       updateData: fieldsToUpdate
     });
 
+    log.info('Profile updated', { userId: req.user._id, fields: Object.keys(fieldsToUpdate) });
     res.status(200).json({ success: true, data: user });
   } catch (error) {
+    log.error('Profile update failed', { userId: req.user?._id, error: error.message });
     next(error);
   }
 };
@@ -84,14 +95,16 @@ exports.updateProfile = async (req, res, next) => {
 // @route   PUT /api/auth/updatepassword
 exports.updatePassword = async (req, res, next) => {
   try {
+    log.info('Password change request', { userId: req.user._id });
     await authUsecase.changeUserPassword({
       userId: req.user._id,
       currentPassword: req.body.currentPassword,
       newPassword: req.body.newPassword
     });
-
+    log.info('Password changed successfully', { userId: req.user._id });
     res.status(200).json({ success: true, message: 'Password updated successfully' });
   } catch (error) {
+    log.warn('Password change failed', { userId: req.user?._id, error: error.message });
     next(error);
   }
 };

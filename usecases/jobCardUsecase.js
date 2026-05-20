@@ -1,13 +1,14 @@
 const JobCard = require('../models/JobCard');
 const Vehicle = require('../models/Vehicle');
+const Garage = require('../models/Garage');
 const reminderUsecase = require('./reminderUsecase');
 const { sendEstimationEmail } = require('../services/emailService');
-const Garage = require('../models/Garage');
+const pdfService = require('../services/pdfService');
 const { randomUUID } = require('crypto');
 const logger = require('../utils/logger');
 const log = logger.child('JobCardUsecase');
 
-exports.getActivityList = async ({ garageId, role, userId, status, mechanicId, search, page = 1, limit = 20 }) => {
+exports.getActivityList = async ({ garageId, role, userId, status, mechanicId, vehicleId, search, page = 1, limit = 20 }) => {
   let query = { garage: garageId };
 
   if (role === 'mechanic') {
@@ -16,6 +17,7 @@ exports.getActivityList = async ({ garageId, role, userId, status, mechanicId, s
     query.assignedMechanic = mechanicId;
   }
 
+  if (vehicleId) query.vehicle = vehicleId;
   if (status) query.status = status;
   if (search) query.jobCardNumber = { $regex: search, $options: 'i' };
 
@@ -243,5 +245,25 @@ exports.removeJobCard = async ({ jobCardId, garageId }) => {
 
   await Vehicle.findByIdAndUpdate(jobCard.vehicle, { $pull: { serviceHistory: jobCard._id } });
   await JobCard.findByIdAndDelete(jobCardId);
+  log.info('Job card and service history reference removed', { jobCardId, garageId });
   return true;
 };
+
+exports.generateEstimationPDFBuffer = async ({ jobCardId, garageId }) => {
+  log.info('Generating estimation PDF', { jobCardId, garageId });
+
+  const jobCard = await exports.getJobCardDetails({ jobCardId, garageId });
+  const garage = await Garage.findById(garageId).lean();
+
+  if (!garage) {
+    const err = new Error('Garage not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const buffer = await pdfService.generateEstimationPDF(jobCard, garage);
+  log.info('Estimation PDF generated successfully', { jobCardId, jobCardNumber: jobCard.jobCardNumber, bytes: buffer.length });
+
+  return { buffer, jobCardNumber: jobCard.jobCardNumber };
+};
+
