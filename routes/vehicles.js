@@ -5,7 +5,8 @@ const {
   getVehicle,
   createVehicle,
   updateVehicle,
-  deleteVehicle
+  deleteVehicle,
+  getVehicleHistory
 } = require('../controllers/vehicleController');
 const { protect, authorize } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
@@ -20,5 +21,7 @@ router.route('/:id')
   .get(asyncHandler(getVehicle))
   .put(authorize('owner', 'admin', 'service_advisor'), asyncHandler(updateVehicle))
   .delete(authorize('owner', 'admin'), asyncHandler(deleteVehicle));
+
+router.get('/:id/history', asyncHandler(getVehicleHistory));
 
 module.exports = router;

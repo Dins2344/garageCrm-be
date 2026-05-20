@@ -1,7 +1,9 @@
 const Invoice = require('../models/Invoice');
 const JobCard = require('../models/JobCard');
 const Inventory = require('../models/Inventory');
+const Garage = require('../models/Garage');
 const reminderUsecase = require('./reminderUsecase');
+const pdfService = require('../services/pdfService');
 const logger = require('../utils/logger');
 const log = logger.child('InvoiceUsecase');
 
@@ -178,5 +180,25 @@ exports.removeInvoice = async ({ invoiceId, garageId, userId }) => {
   }
 
   await Invoice.findByIdAndDelete(invoiceId);
+  log.info('Invoice deleted and job card reopened', { invoiceId, garageId });
   return true;
 };
+
+exports.generateInvoicePDFBuffer = async ({ invoiceId, garageId }) => {
+  log.info('Generating invoice PDF', { invoiceId, garageId });
+
+  const invoice = await exports.getInvoiceDetails({ invoiceId, garageId });
+  const garage = await Garage.findById(garageId).lean();
+
+  if (!garage) {
+    const err = new Error('Garage not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const buffer = await pdfService.generateInvoicePDF(invoice, garage);
+  log.info('Invoice PDF generated successfully', { invoiceId, invoiceNumber: invoice.invoiceNumber, bytes: buffer.length });
+
+  return { buffer, invoiceNumber: invoice.invoiceNumber };
+};
+
