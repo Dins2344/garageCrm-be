@@ -52,7 +52,7 @@ const processServiceReminders = async () => {
           vehiclePlate: reminder.vehicle?.licensePlate || 'Unknown',
           vehicleMake: reminder.vehicle?.make || '',
           vehicleModel: reminder.vehicle?.model || '',
-          garageName: reminder.garage?.name || 'GarageFlow',
+          garageName: reminder.garage?.name || 'GaragePulse',
           garagePhone: reminder.garage?.phone || '',
           nextServiceDate: reminder.nextServiceDate,
           reminderType: reminder.type

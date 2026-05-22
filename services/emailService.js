@@ -88,7 +88,7 @@ const sendEmail = async ({ to, subject, html, text }) => {
       return { logged: true, messageId: null };
     }
 
-    const from = process.env.SMTP_FROM || `"GarageFlow" <noreply@garageflow.com>`;
+    const from = process.env.SMTP_FROM || `"GaragePulse" <noreply@garagepulse.com>`;
 
     const info = await transport.sendMail({ from, to, subject, html, text });
 
@@ -201,7 +201,7 @@ const sendServiceReminder = async ({ customerName, customerEmail, vehiclePlate, 
     <tr>
       <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
         <p style="font-size:12px;color:#94a3b8;margin:0;">
-          Sent by ${garageName} via GarageFlow CRM<br/>
+          Sent by ${garageName} via GaragePulse CRM<br/>
           You are receiving this because your vehicle is registered with us.
         </p>
       </td>
@@ -314,7 +314,7 @@ const sendEstimationEmail = async ({
     <!-- Footer -->
     <tr>
       <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-        <p style="font-size:12px;color:#94a3b8;margin:0;">Questions? Call us at <strong>${garagePhone}</strong><br/>Sent by ${garageName} via GarageFlow CRM</p>
+        <p style="font-size:12px;color:#94a3b8;margin:0;">Questions? Call us at <strong>${garagePhone}</strong><br/>Sent by ${garageName} via GaragePulse CRM</p>
       </td>
     </tr>
   </table>

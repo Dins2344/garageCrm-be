@@ -13,8 +13,8 @@ const logger = require('../utils/logger');
 const log = logger.child('AdminUsecase');
 
 // ─── Credentials (env-based) ───────────────────────────────────────────────
-const ADMIN_EMAIL    = process.env.SUPER_ADMIN_EMAIL    || 'superadmin@garageflow.com';
-const ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || 'GarageFlow@Admin2026';
+const ADMIN_EMAIL    = process.env.SUPER_ADMIN_EMAIL    || 'superadmin@garagepulse.com';
+const ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || 'GaragePulse@Admin2026';
 const ADMIN_SECRET   = process.env.SUPER_ADMIN_SECRET   || (process.env.JWT_SECRET + '_admin');
 
 /**

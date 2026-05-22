@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────
-# GarageFlow — EC2 Instance Setup Script
+# GaragePulse — EC2 Instance Setup Script
 # Run this ONCE on a fresh Ubuntu 22.04/24.04 EC2 instance
 # Usage: chmod +x setup-ec2.sh && sudo ./setup-ec2.sh
 # ─────────────────────────────────────────────────────
@@ -8,7 +8,7 @@
 set -e
 
 echo "══════════════════════════════════════════"
-echo "   GarageFlow EC2 Setup Script"
+echo "   GaragePulse EC2 Setup Script"
 echo "══════════════════════════════════════════"
 
 # 1. System update
@@ -33,9 +33,9 @@ usermod -aG docker ubuntu
 
 # 4. Setup project directories
 echo "📁 Creating project directories..."
-mkdir -p /home/ubuntu/garageflow/nginx/ssl
+mkdir -p /home/ubuntu/garagepulse/nginx/ssl
 mkdir -p /home/ubuntu/deploy
-chown -R ubuntu:ubuntu /home/ubuntu/garageflow /home/ubuntu/deploy
+chown -R ubuntu:ubuntu /home/ubuntu/garagepulse /home/ubuntu/deploy
 
 # 5. Enable Docker to start on boot
 systemctl enable docker
@@ -65,6 +65,6 @@ echo "════════════════════════�
 echo ""
 echo "Next steps:"
 echo "  1. Log out and back in (for docker group)"
-echo "  2. Create .env.production in ~/garageflow/"
+echo "  2. Create .env.production in ~/garagepulse/"
 echo "  3. Push to GitHub main branch to trigger deploy"
 echo ""

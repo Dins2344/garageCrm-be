@@ -28,7 +28,7 @@ const app = express();
 // ── Swagger API Documentation (mounted before helmet to avoid CSP issues) ──
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: 'GarageFlow API Docs'
+  customSiteTitle: 'GaragePulse API Docs'
 }));
 app.get('/api-docs.json', (req, res) => res.json(swaggerSpec));
 
@@ -97,7 +97,7 @@ app.get('/api/health', async (req, res) => {
 
   res.json({
     success: true,
-    message: 'GarageFlow API is running',
+    message: 'GaragePulse API is running',
     timestamp: new Date(),
     uptime: {
       process: Math.floor(process.uptime()) + 's',
@@ -134,7 +134,7 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  log.info('GarageFlow API Server started', {
+  log.info('GaragePulse API Server started', {
     mode: process.env.NODE_ENV,
     port: PORT,
     url: `http://localhost:${PORT}`
