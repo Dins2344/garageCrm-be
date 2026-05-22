@@ -146,7 +146,7 @@ exports.updateJobCardProgress = async ({ jobCardId, garageId, userId, updateData
           jobCardNumber: jobCard.jobCardNumber,
           complaints: jobCard.complaints || [],
           grandTotal: jobCard.estimation?.grandTotal || 0,
-          garageName: garage?.name || 'GarageFlow',
+          garageName: garage?.name || 'GaragePulse',
           garagePhone: garage?.phone || '',
           approvalLink
         });

@@ -1,4 +1,4 @@
-name: Deploy GarageFlow Backend
+name: Deploy GaragePulse Backend
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch: # Manual trigger
 
 env:
-  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/garageflow-api
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/garagepulse-api
 
 jobs:
   # ── Job 1: Build & Push Docker Image ──
@@ -48,12 +48,12 @@ jobs:
           port: 22
           timeout: 60s
           source: "docker-compose.yml,nginx/"
-          target: "/home/${{ secrets.EC2_USER }}/garageflow/"
+          target: "/home/${{ secrets.EC2_USER }}/garagepulse/"
 
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.2.1
         env:
-          DOCKER_IMG: ${{ secrets.DOCKERHUB_USERNAME }}/garageflow-api
+          DOCKER_IMG: ${{ secrets.DOCKERHUB_USERNAME }}/garagepulse-api
           DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
           DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         with:
@@ -74,7 +74,7 @@ jobs:
             docker pull "${DOCKER_IMG}:latest"
 
             echo "📂 Moving to project directory..."
-            cd ~/garageflow
+            cd ~/garagepulse
 
             echo "🔄 Stopping old containers..."
             docker compose down --remove-orphans || true

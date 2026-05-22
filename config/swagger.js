@@ -4,18 +4,18 @@ const options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'GarageFlow API',
+      title: 'GaragePulse API',
       version: '1.0.0',
       description:
-        'Complete REST API documentation for GarageFlow — a garage & workshop management platform. ' +
+        'Complete REST API documentation for GaragePulse — a garage & workshop management platform. ' +
         'Manage job cards, customers, vehicles, invoices, inventory, staff, and more.',
       contact: {
-        name: 'GarageFlow Support',
+        name: 'GaragePulse Support',
         email: 'dind4322@gmail.com'
       },
       license: {
         name: 'Private',
-        url: 'https://garageflow.com'
+        url: 'https://garagepulse.com'
       }
     },
     servers: [
@@ -48,7 +48,7 @@ const options = {
           type: 'object',
           required: ['email', 'password'],
           properties: {
-            email: { type: 'string', format: 'email', example: 'owner@garageflow.com' },
+            email: { type: 'string', format: 'email', example: 'owner@garagepulse.com' },
             password: { type: 'string', example: 'password123' }
           }
         },

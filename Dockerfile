@@ -13,8 +13,8 @@ RUN npm ci --omit=dev
 FROM node:20-alpine
 
 # Security: run as non-root user
-RUN addgroup -g 1001 -S garageflow && \
-    adduser -S garageflow -u 1001
+RUN addgroup -g 1001 -S garagepulse && \
+    adduser -S garagepulse -u 1001
 
 WORKDIR /app
 
@@ -28,9 +28,9 @@ COPY . .
 RUN rm -rf .git .env .gitignore logs/*.log
 
 # Create logs directory with proper permissions
-RUN mkdir -p logs uploads && chown -R garageflow:garageflow /app
+RUN mkdir -p logs uploads && chown -R garagepulse:garagepulse /app
 
-USER garageflow
+USER garagepulse
 
 # Expose the port
 EXPOSE 5000
