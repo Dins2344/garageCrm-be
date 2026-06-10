@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const bcrypt = require('bcryptjs');
 const logger = require('../utils/logger');
 const log = logger.child('UserUsecase');
 
@@ -19,6 +20,14 @@ exports.registerStaff = async ({ staffData, garageId }) => {
 
 exports.updateStaffDetails = async ({ staffId, garageId, updateData }) => {
   log.info('Updating staff details', { staffId, garageId, fields: Object.keys(updateData) });
+
+  // findOneAndUpdate bypasses the pre('save') bcrypt hook, so we hash manually
+  if (updateData.password) {
+    const salt = await bcrypt.genSalt(12);
+    updateData.password = await bcrypt.hash(updateData.password, salt);
+    log.info('Password hashed before staff update', { staffId });
+  }
+
   const user = await User.findOneAndUpdate(
     { _id: staffId, garage: garageId },
     updateData,
