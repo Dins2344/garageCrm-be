@@ -26,6 +26,7 @@ exports.getActivityList = async ({ garageId, role, userId, status, mechanicId, v
     .populate('vehicle', 'licensePlate make model color')
     .populate('customer', 'name phone')
     .populate('assignedMechanic', 'name')
+    .populate('assignedAdvisor', 'name')
     .select('-estimation.parts -estimation.labor -statusHistory')
     .sort('-createdAt')
     .skip((page - 1) * limit)
