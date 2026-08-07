@@ -7,6 +7,7 @@ const morgan = require('morgan');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const hpp = require('hpp');
+const cookieParser = require('cookie-parser');
 const mongoSanitize = require('./middleware/mongoSanitize');
 
 const connectDB = require('./config/db');
@@ -41,6 +42,7 @@ app.use(cors({
 // 2. Body Parser — Must come BEFORE security/sanitization
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(cookieParser());
 
 // 3. Security & Performance middleware — Now they have req.body to work with
 app.use(helmet());           // Standard security headers
