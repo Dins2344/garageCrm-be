@@ -83,3 +83,22 @@ exports.removeVehicle = async ({ vehicleId, garageId }) => {
   log.info('Vehicle removed from registry', { vehicleId, garageId });
   return true;
 };
+
+exports.getVehicleHistory = async ({ vehicleId, garageId, page = 1, limit = 20 }) => {
+  const JobCard = require('../models/JobCard');
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+  const query = { vehicle: vehicleId, garage: garageId };
+
+  const total = await JobCard.countDocuments(query);
+  const jobCards = await JobCard.find(query)
+    .populate('customer', 'name phone')
+    .populate('assignedMechanic', 'name')
+    .select('-estimation.parts -estimation.labor -statusHistory -photos')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parseInt(limit))
+    .lean();
+
+  log.info('Vehicle history fetched', { vehicleId, garageId, count: jobCards.length, total });
+  return { jobCards, total, page: parseInt(page), limit: parseInt(limit) };
+};

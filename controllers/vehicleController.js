@@ -1,5 +1,4 @@
 const vehicleUsecase = require('../usecases/vehicleUsecase');
-const JobCard = require('../models/JobCard');
 const logger = require('../utils/logger');
 const log = logger.child('VehicleController');
 
@@ -114,30 +113,25 @@ exports.getVehicleHistory = async (req, res, next) => {
     const { page = 1, limit = 20 } = req.query;
     log.info('Fetching vehicle service history', { vehicleId: id, garageId, page, limit });
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const query = { vehicle: id, garage: garageId };
-    const total = await JobCard.countDocuments(query);
+    const result = await vehicleUsecase.getVehicleHistory({
+      vehicleId: id,
+      garageId,
+      page,
+      limit
+    });
 
-    const jobCards = await JobCard.find(query)
-      .populate('customer', 'name phone')
-      .populate('assignedMechanic', 'name')
-      .select('-estimation.parts -estimation.labor -statusHistory -photos')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
-
-    log.info('Vehicle history fetched', { vehicleId: id, garageId, count: jobCards.length, total });
+    log.info('Vehicle history fetched', { vehicleId: id, garageId, count: result.jobCards.length, total: result.total });
     res.status(200).json({
       success: true,
-      count: jobCards.length,
-      total,
-      pages: Math.ceil(total / parseInt(limit)),
-      currentPage: parseInt(page),
-      data: jobCards
+      count: result.jobCards.length,
+      total: result.total,
+      pages: Math.ceil(result.total / result.limit),
+      currentPage: result.page,
+      data: result.jobCards
     });
   } catch (error) {
     log.error('Failed to fetch vehicle history', { vehicleId: req.params.id, error: error.message });
     next(error);
   }
 };
+
