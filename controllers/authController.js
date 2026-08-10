@@ -5,18 +5,29 @@ const log = logger.child('AuthController');
 // Helper to send formatted token response
 const sendTokenResponse = (user, statusCode, res) => {
   const token = user.getSignedJwtToken();
-  res.status(statusCode).json({
-    success: true,
-    token,
-    data: {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      garage: user.garage
-    }
-  });
+
+  const options = {
+    expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+  };
+
+  res
+    .status(statusCode)
+    .cookie('token', token, options)
+    .json({
+      success: true,
+      token, // Kept for mobile app backward compatibility
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        garage: user.garage
+      }
+    });
 };
 
 // @desc    Register owner & create garage
@@ -107,4 +118,19 @@ exports.updatePassword = async (req, res, next) => {
     log.warn('Password change failed', { userId: req.user?._id, error: error.message });
     next(error);
   }
+};
+
+// @desc    Log user out / clear cookie
+// @route   POST /api/auth/logout
+exports.logout = (req, res, next) => {
+  log.info('User logout requested');
+  res.cookie('token', 'none', {
+    expires: new Date(Date.now() + 10 * 1000),
+    httpOnly: true
+  });
+
+  res.status(200).json({
+    success: true,
+    data: {}
+  });
 };
