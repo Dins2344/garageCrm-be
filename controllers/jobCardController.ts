@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+﻿import { Request, Response, NextFunction } from 'express';
 import * as jobCardUsecase from '../usecases/jobCardUsecase';
 import logger from '../utils/logger';
 const log = logger.child('JobCardController');
@@ -8,7 +8,7 @@ const log = logger.child('JobCardController');
 export const getJobCards = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { status, mechanicId, vehicle, search, page, limit } = req.query as Record<string, string | undefined>;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Fetching job cards list', { garageId, status, mechanicId, vehicle, search, page, limit });
 
     const { jobCards, total, page: currentPage, limit: currentLimit } = await jobCardUsecase.getActivityList({
@@ -33,7 +33,7 @@ export const getJobCards = async (req: Request, res: Response, next: NextFunctio
       data: jobCards
     });
   } catch (error) {
-    log.error('Failed to fetch job cards', { garageId: req.user?.garage?._id, error: (error as Error).message });
+    log.error('Failed to fetch job cards', { garageId: req.garageId, error: (error as Error).message });
     next(error);
   }
 };
@@ -43,7 +43,7 @@ export const getJobCards = async (req: Request, res: Response, next: NextFunctio
 export const getJobCard = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Fetching single job card', { jobCardId: id, garageId });
     const jobCard = await jobCardUsecase.getJobCardDetails({ jobCardId: id, garageId });
     log.info('Job card fetched successfully', { jobCardId: id, status: jobCard.status });
@@ -58,7 +58,7 @@ export const getJobCard = async (req: Request, res: Response, next: NextFunction
 // @route   POST /api/jobcards
 export const createJobCard = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Creating new job card', { garageId, userId: req.user!._id, serviceType: req.body.serviceType });
 
     const jobCard = await jobCardUsecase.openJobCard({
@@ -72,7 +72,7 @@ export const createJobCard = async (req: Request, res: Response, next: NextFunct
     log.info('Job card created successfully', { jobCardId: jobCard._id, jobCardNumber: jobCard.jobCardNumber, garageId });
     res.status(201).json({ success: true, data: populated });
   } catch (error) {
-    log.error('Failed to create job card', { garageId: req.user?.garage?._id, error: (error as Error).message });
+    log.error('Failed to create job card', { garageId: req.garageId, error: (error as Error).message });
     next(error);
   }
 };
@@ -82,7 +82,7 @@ export const createJobCard = async (req: Request, res: Response, next: NextFunct
 export const updateJobCard = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Updating job card', { jobCardId: id, garageId, userId: req.user!._id, fields: Object.keys(req.body) });
 
     const jobCard = await jobCardUsecase.updateJobCardProgress({
@@ -105,7 +105,7 @@ export const updateJobCard = async (req: Request, res: Response, next: NextFunct
 export const updateEstimation = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Updating job card estimation', { jobCardId: id, garageId });
 
     const jobCard = await jobCardUsecase.calculateAndSaveEstimation({
@@ -127,7 +127,7 @@ export const updateEstimation = async (req: Request, res: Response, next: NextFu
 export const approveEstimation = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Approving estimation', { jobCardId: id, garageId, userId: req.user!._id });
 
     const jobCard = await jobCardUsecase.approveJobEstimation({
@@ -149,7 +149,7 @@ export const approveEstimation = async (req: Request, res: Response, next: NextF
 export const deleteJobCard = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Deleting job card', { jobCardId: id, garageId });
 
     await jobCardUsecase.removeJobCard({ jobCardId: id, garageId });
@@ -167,7 +167,7 @@ export const deleteJobCard = async (req: Request, res: Response, next: NextFunct
 export const downloadEstimation = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Estimation PDF download requested', { jobCardId: id, garageId, userId: req.user!._id });
 
     const { buffer, jobCardNumber } = await jobCardUsecase.generateEstimationPDFBuffer({

@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+﻿import { Request, Response, NextFunction } from 'express';
 import * as invoiceUsecase from '../usecases/invoiceUsecase';
 import logger from '../utils/logger';
 const log = logger.child('InvoiceController');
@@ -8,7 +8,7 @@ const log = logger.child('InvoiceController');
 export const getInvoices = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { search, paymentStatus, page, limit } = req.query as Record<string, string | undefined>;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Fetching invoices list', { garageId, search, paymentStatus, page, limit });
 
     const { invoices, total } = await invoiceUsecase.getInvoicesList({
@@ -27,7 +27,7 @@ export const getInvoices = async (req: Request, res: Response, next: NextFunctio
       data: invoices
     });
   } catch (error) {
-    log.error('Failed to fetch invoices', { garageId: req.user?.garage?._id, error: (error as Error).message });
+    log.error('Failed to fetch invoices', { garageId: req.garageId, error: (error as Error).message });
     next(error);
   }
 };
@@ -37,7 +37,7 @@ export const getInvoices = async (req: Request, res: Response, next: NextFunctio
 export const getInvoice = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Fetching single invoice', { invoiceId: id, garageId });
 
     const invoice = await invoiceUsecase.getInvoiceDetails({ invoiceId: id, garageId });
@@ -53,7 +53,7 @@ export const getInvoice = async (req: Request, res: Response, next: NextFunction
 // @route   POST /api/invoices
 export const createInvoice = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     const { jobCardId } = req.body;
     log.info('Creating invoice from job card', { garageId, jobCardId, userId: req.user!._id });
 
@@ -66,7 +66,7 @@ export const createInvoice = async (req: Request, res: Response, next: NextFunct
     log.info('Invoice created successfully', { invoiceId: invoice._id, invoiceNumber: invoice.invoiceNumber, garageId });
     res.status(201).json({ success: true, data: invoice });
   } catch (error) {
-    log.error('Failed to create invoice', { garageId: req.user?.garage?._id, error: (error as Error).message });
+    log.error('Failed to create invoice', { garageId: req.garageId, error: (error as Error).message });
     next(error);
   }
 };
@@ -76,7 +76,7 @@ export const createInvoice = async (req: Request, res: Response, next: NextFunct
 export const updatePaymentStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Updating invoice payment status', { invoiceId: id, garageId, paymentData: req.body });
 
     const invoice = await invoiceUsecase.updatePaymentStatus({
@@ -98,7 +98,7 @@ export const updatePaymentStatus = async (req: Request, res: Response, next: Nex
 export const deleteInvoice = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Deleting invoice', { invoiceId: id, garageId, userId: req.user!._id });
 
     await invoiceUsecase.removeInvoice({
@@ -120,7 +120,7 @@ export const deleteInvoice = async (req: Request, res: Response, next: NextFunct
 export const downloadInvoicePDF = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Invoice PDF download requested', { invoiceId: id, garageId, userId: req.user!._id });
 
     const { buffer, invoiceNumber } = await invoiceUsecase.generateInvoicePDFBuffer({

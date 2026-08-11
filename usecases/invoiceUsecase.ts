@@ -8,6 +8,7 @@ import * as pdfService from '../services/pdfService';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { PaymentStatus, PaymentMethod } from '../types/domain';
+import { FREE_PLAN_LIMITS } from '../config/planLimits';
 
 const log = logger.child('InvoiceUsecase');
 
@@ -75,6 +76,22 @@ export const generateInvoiceFromJobCard = async ({ jobCardId, garageId, userId }
 
   if (!jobCard) {
     throw new HttpError('Job card not found', 404);
+  }
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfTomorrow = new Date(startOfToday);
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+  const todayCount = await Invoice.countDocuments({
+    garage: garageId,
+    createdAt: { $gte: startOfToday, $lt: startOfTomorrow }
+  });
+  if (todayCount >= FREE_PLAN_LIMITS.maxInvoicesPerGaragePerDay) {
+    throw new HttpError(
+      `Daily invoice limit reached (${FREE_PLAN_LIMITS.maxInvoicesPerGaragePerDay}/day) on the free plan.`,
+      403
+    );
   }
 
   // Create invoice from job card

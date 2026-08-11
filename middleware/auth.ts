@@ -1,6 +1,8 @@
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
+import { Types } from 'mongoose';
 import User from '../models/User';
+import Garage from '../models/Garage';
 import logger from '../utils/logger';
 import { Role } from '../types/domain';
 import { AuthenticatedUser } from '../types/express';
@@ -11,6 +13,29 @@ interface AccessTokenPayload {
   id: string;
   role: Role;
 }
+
+// Resolves which garage a request operates on. Owners can act on any garage
+// they own by passing `X-Garage-Id`; every other role is always confined to
+// their own assigned garage, regardless of what header they send.
+const resolveGarageId = async (
+  user: AuthenticatedUser,
+  garageIdHeader: string | string[] | undefined
+): Promise<Types.ObjectId | 'invalid' | 'forbidden'> => {
+  if (user.role !== 'owner' || !garageIdHeader) {
+    return user.garage._id;
+  }
+
+  const requestedId = Array.isArray(garageIdHeader) ? garageIdHeader[0] : garageIdHeader;
+  if (!Types.ObjectId.isValid(requestedId)) {
+    return 'invalid';
+  }
+
+  const owned = await Garage.exists({ _id: requestedId, owner: user._id });
+  if (!owned) {
+    return 'forbidden';
+  }
+  return new Types.ObjectId(requestedId);
+};
 
 // Protect routes -- require authentication
 export const protect = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -55,7 +80,18 @@ export const protect = async (req: Request, res: Response, next: NextFunction): 
 
     req.user = user as unknown as AuthenticatedUser;
 
-    log.debug('User authenticated successfully', { userId: user._id, role: user.role });
+    const resolvedGarageId = await resolveGarageId(req.user, req.headers['x-garage-id']);
+    if (resolvedGarageId === 'invalid') {
+      res.status(400).json({ success: false, message: 'Invalid garage ID' });
+      return;
+    }
+    if (resolvedGarageId === 'forbidden') {
+      res.status(403).json({ success: false, message: 'You do not have access to this garage' });
+      return;
+    }
+    req.garageId = resolvedGarageId;
+
+    log.debug('User authenticated successfully', { userId: user._id, role: user.role, garageId: req.garageId });
     next();
   } catch (error) {
     log.warn('Token verification failed', { error: (error as Error).message, ip: req.ip });

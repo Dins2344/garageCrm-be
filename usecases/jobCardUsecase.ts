@@ -9,6 +9,7 @@ import * as pdfService from '../services/pdfService';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { JobStatus, Role } from '../types/domain';
+import { FREE_PLAN_LIMITS } from '../config/planLimits';
 
 const log = logger.child('JobCardUsecase');
 
@@ -83,6 +84,22 @@ interface OpenInput {
 }
 
 export const openJobCard = async ({ jobCardData, garageId, userId }: OpenInput) => {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfTomorrow = new Date(startOfToday);
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+  const todayCount = await JobCard.countDocuments({
+    garage: garageId,
+    createdAt: { $gte: startOfToday, $lt: startOfTomorrow }
+  });
+  if (todayCount >= FREE_PLAN_LIMITS.maxJobCardsPerGaragePerDay) {
+    throw new HttpError(
+      `Daily job card limit reached (${FREE_PLAN_LIMITS.maxJobCardsPerGaragePerDay}/day) on the free plan.`,
+      403
+    );
+  }
+
   const data = {
     ...jobCardData,
     garage: garageId,

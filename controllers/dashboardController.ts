@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+﻿import { Request, Response, NextFunction } from 'express';
 import * as dashboardUsecase from '../usecases/dashboardUsecase';
 import logger from '../utils/logger';
 const log = logger.child('DashboardController');
@@ -8,11 +8,11 @@ const log = logger.child('DashboardController');
 export const getDashboardStats = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const stats = await dashboardUsecase.compileStats({
-      garageId: req.user!.garage._id
+      garageId: req.garageId!
     });
 
     log.info('Dashboard stats compiled successfully', {
-      garageId: req.user!.garage._id,
+      garageId: req.garageId!,
       queryTimeMs: stats.queryTimeMs
     });
 
@@ -36,10 +36,10 @@ export const getChartData = async (req: Request, res: Response, next: NextFuncti
     })();
     const end = endDate ? new Date(new Date(endDate).setHours(23, 59, 59, 999)) : new Date();
 
-    log.info('Fetching chart data', { garageId: req.user!.garage._id, start, end, groupBy });
+    log.info('Fetching chart data', { garageId: req.garageId!, start, end, groupBy });
 
     const data = await dashboardUsecase.getChartData({
-      garageId: req.user!.garage._id,
+      garageId: req.garageId!,
       startDate: start,
       endDate: end,
       groupBy

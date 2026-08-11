@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+﻿import { Request, Response, NextFunction } from 'express';
 import * as reminderUsecase from '../usecases/reminderUsecase';
 import { processServiceReminders } from '../services/cronScheduler';
 import logger from '../utils/logger';
@@ -9,7 +9,7 @@ const log = logger.child('ReminderController');
 export const getReminders = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { status, page, limit } = req.query as Record<string, string | undefined>;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Fetching reminders list', { garageId, status, page, limit });
     const { reminders, total } = await reminderUsecase.getRemindersList({
       garageId,
@@ -20,7 +20,7 @@ export const getReminders = async (req: Request, res: Response, next: NextFuncti
     log.info('Reminders list fetched', { garageId, count: reminders.length, total });
     res.status(200).json({ success: true, count: reminders.length, total, data: reminders });
   } catch (error) {
-    log.error('Failed to fetch reminders', { garageId: req.user?.garage?._id, error: (error as Error).message });
+    log.error('Failed to fetch reminders', { garageId: req.garageId, error: (error as Error).message });
     next(error);
   }
 };
@@ -30,7 +30,7 @@ export const getReminders = async (req: Request, res: Response, next: NextFuncti
 export const getUpcoming = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const days = parseInt(String(req.query.days), 10) || 30;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Fetching upcoming reminders', { garageId, days });
     const reminders = await reminderUsecase.getUpcomingReminders({
       garageId,
@@ -39,7 +39,7 @@ export const getUpcoming = async (req: Request, res: Response, next: NextFunctio
     log.info('Upcoming reminders fetched', { garageId, count: reminders.length });
     res.status(200).json({ success: true, count: reminders.length, data: reminders });
   } catch (error) {
-    log.error('Failed to fetch upcoming reminders', { garageId: req.user?.garage?._id, error: (error as Error).message });
+    log.error('Failed to fetch upcoming reminders', { garageId: req.garageId, error: (error as Error).message });
     next(error);
   }
 };
@@ -48,7 +48,7 @@ export const getUpcoming = async (req: Request, res: Response, next: NextFunctio
 // @route   POST /api/reminders
 export const createReminder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Creating service reminder', { garageId, vehicleId: req.body.vehicle });
     const reminder = await reminderUsecase.createReminder({
       reminderData: req.body,
@@ -57,7 +57,7 @@ export const createReminder = async (req: Request, res: Response, next: NextFunc
     log.info('Service reminder created', { reminderId: reminder._id, garageId });
     res.status(201).json({ success: true, data: reminder });
   } catch (error) {
-    log.error('Failed to create reminder', { garageId: req.user?.garage?._id, error: (error as Error).message });
+    log.error('Failed to create reminder', { garageId: req.garageId, error: (error as Error).message });
     next(error);
   }
 };
@@ -67,7 +67,7 @@ export const createReminder = async (req: Request, res: Response, next: NextFunc
 export const updateStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Updating reminder status', { reminderId: id, garageId, status: req.body.status });
     const reminder = await reminderUsecase.updateReminderStatus({
       reminderId: id,
@@ -87,7 +87,7 @@ export const updateStatus = async (req: Request, res: Response, next: NextFuncti
 export const deleteReminder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const garageId = req.user!.garage._id;
+    const garageId = req.garageId!;
     log.info('Deleting reminder', { reminderId: id, garageId });
     await reminderUsecase.removeReminder({
       reminderId: id,

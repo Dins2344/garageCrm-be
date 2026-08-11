@@ -1,4 +1,4 @@
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 import { IUser } from '../models/User';
 import { IGarage } from '../models/Garage';
 
@@ -20,6 +20,10 @@ declare global {
     interface Request {
       user?: AuthenticatedUser;
       admin?: AdminTokenPayload;
+      // The garage this request operates on, resolved by `protect` from the
+      // `X-Garage-Id` header for owners (validated against Garage.owner) or the
+      // user's own `garage` for every other role. See middleware/auth.ts.
+      garageId?: Types.ObjectId;
     }
   }
 }

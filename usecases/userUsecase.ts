@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import User, { IUser } from '../models/User';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
+import { FREE_PLAN_LIMITS } from '../config/planLimits';
 
 const log = logger.child('UserUsecase');
 
@@ -39,6 +40,15 @@ interface RegisterInput {
 
 export const registerStaff = async ({ staffData, garageId }: RegisterInput) => {
   log.info('Registering new staff member', { garageId, role: staffData.role, email: staffData.email });
+
+  const staffCount = await User.countDocuments({ garage: garageId, role: { $ne: 'owner' } });
+  if (staffCount >= FREE_PLAN_LIMITS.maxStaffPerGarage) {
+    throw new HttpError(
+      `Staff limit reached (${FREE_PLAN_LIMITS.maxStaffPerGarage} per garage) on the free plan.`,
+      403
+    );
+  }
+
   const dataWithGarage = { ...staffData, garage: garageId };
   const user = await User.create(dataWithGarage);
   log.info('New staff registered', { userId: user._id, role: user.role, garageId });

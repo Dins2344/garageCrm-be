@@ -72,4 +72,7 @@ const garageSchema = new Schema<IGarage>({
   timestamps: true
 });
 
+// A single owner cannot have two garages with the same name (their branches must be distinguishable).
+garageSchema.index({ owner: 1, name: 1 }, { unique: true });
+
 export default mongoose.model<IGarage>('Garage', garageSchema);

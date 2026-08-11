@@ -43,3 +43,17 @@ export async function createGarageWithOwner(emailSuffix: string) {
 }
 
 export const authHeader = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+/** Adds an authorization header plus an active-garage override for owner requests. */
+export const authHeaderFor = (token: string, garageId: string) => ({
+  Authorization: `Bearer ${token}`,
+  'X-Garage-Id': garageId
+});
+
+/** Creates an additional garage (branch) for an already-registered owner via the real API. */
+export async function addGarageToOwner(token: string, name: string) {
+  return request(app)
+    .post('/api/garage/branches')
+    .set(authHeader(token))
+    .send({ name, phone: nextPhone() });
+}
