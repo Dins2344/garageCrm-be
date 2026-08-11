@@ -5,3 +5,5 @@ logs/*.log
 uploads/
 *.tar.gz
 nginx/ssl/
+dist/
+coverage/
