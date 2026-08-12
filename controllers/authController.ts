@@ -68,8 +68,12 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
 export const getMe = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     log.info('Me request', { userId: req.user?._id, role: req.user?.role });
-    // req.user is already populated by auth middleware
-    res.status(200).json({ success: true, data: req.user });
+    // req.user.garage is populated by the auth middleware for internal use,
+    // but the client-side User type (web and mobile) expects garage as a
+    // plain id string, matching /auth/login and /auth/register — flatten it
+    // back down here rather than leaking the populated document to clients.
+    const data = { ...req.user!.toObject(), garage: req.user!.garage._id };
+    res.status(200).json({ success: true, data });
   } catch (error) {
     log.error('Failed to get current user', { error: (error as Error).message });
     next(error);
