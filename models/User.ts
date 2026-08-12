@@ -13,6 +13,8 @@ export interface IUser extends Document {
   garage: Types.ObjectId;
   avatar: string;
   isActive: boolean;
+  resetPasswordToken?: string;
+  resetPasswordExpire?: Date;
   createdAt: Date;
   updatedAt: Date;
   getSignedJwtToken(): string;
@@ -61,6 +63,14 @@ const userSchema = new Schema<IUser>({
   isActive: {
     type: Boolean,
     default: true
+  },
+  resetPasswordToken: {
+    type: String,
+    select: false
+  },
+  resetPasswordExpire: {
+    type: Date,
+    select: false
   }
 }, {
   timestamps: true

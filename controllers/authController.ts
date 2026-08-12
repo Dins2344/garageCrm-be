@@ -126,6 +126,43 @@ export const updatePassword = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+// @desc    Request a password reset email (owners only)
+// @route   POST /api/auth/forgotpassword
+export const forgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    log.info('Password reset requested', { email: req.body.email });
+    const { status } = await authUsecase.forgotPassword({
+      email: req.body.email,
+      frontendUrl: process.env.CLIENT_URL as string
+    });
+
+    const message = status === 'staff-managed'
+      ? 'This account is managed by your garage. Ask your owner or an admin to reset your password from Settings → Staff.'
+      : 'If an account exists for that email, a password reset link has been sent.';
+
+    res.status(200).json({ success: true, message });
+  } catch (error) {
+    log.error('Password reset request failed', { email: req.body.email, error: (error as Error).message });
+    next(error);
+  }
+};
+
+// @desc    Reset password using emailed token
+// @route   PUT /api/auth/resetpassword/:token
+export const resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    await authUsecase.resetPassword({
+      token: req.params.token as string,
+      newPassword: req.body.password
+    });
+    log.info('Password reset via token succeeded');
+    res.status(200).json({ success: true, message: 'Password reset successfully. You can now log in.' });
+  } catch (error) {
+    log.warn('Password reset via token failed', { error: (error as Error).message });
+    next(error);
+  }
+};
+
 // @desc    Log user out / clear cookie
 // @route   POST /api/auth/logout
 export const logout = (_req: Request, res: Response): void => {

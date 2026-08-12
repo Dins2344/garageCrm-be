@@ -367,3 +367,65 @@ export const sendEstimationEmail = async ({
 
   return sendEmail({ to: customerEmail, subject, html, text });
 };
+
+interface PasswordResetEmailInput {
+  to: string;
+  name: string;
+  resetUrl: string;
+}
+
+// ───── Password Reset Email ─────
+export const sendPasswordResetEmail = async ({ to, name, resetUrl }: PasswordResetEmailInput): Promise<SendEmailResult> => {
+  const subject = 'Reset your GaragePulse password';
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:32px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.07);">
+    <!-- Header -->
+    <tr>
+      <td style="background:linear-gradient(135deg,#3b5ff8,#7c3aed);padding:36px 40px;text-align:center;">
+        <p style="color:rgba(255,255,255,0.75);margin:0 0 6px;font-size:13px;letter-spacing:0.06em;text-transform:uppercase;">Password Reset</p>
+        <h1 style="color:#ffffff;margin:0;font-size:26px;font-weight:700;">GaragePulse</h1>
+      </td>
+    </tr>
+    <!-- Body -->
+    <tr>
+      <td style="padding:36px 40px;">
+        <p style="font-size:16px;color:#1e293b;margin:0 0 8px;">Hi <strong>${name}</strong>,</p>
+        <p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 28px;">
+          We received a request to reset your GaragePulse password. Click the button below to choose a new one. This link expires in <strong>30 minutes</strong>.
+        </p>
+
+        <!-- CTA -->
+        <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
+          <tr>
+            <td style="background:linear-gradient(135deg,#3b5ff8,#7c3aed);border-radius:10px;">
+              <a href="${resetUrl}" style="display:inline-block;padding:16px 48px;color:#ffffff;font-weight:700;font-size:16px;text-decoration:none;letter-spacing:0.02em;">Reset Password</a>
+            </td>
+          </tr>
+        </table>
+
+        <p style="font-size:13px;color:#94a3b8;text-align:center;margin:0 0 24px;">Or paste this link in your browser:<br/>
+          <a href="${resetUrl}" style="color:#3b5ff8;word-break:break-all;">${resetUrl}</a>
+        </p>
+
+        <p style="font-size:13px;color:#94a3b8;margin:0;">If you didn't request this, you can safely ignore this email — your password won't be changed.</p>
+      </td>
+    </tr>
+    <!-- Footer -->
+    <tr>
+      <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+        <p style="font-size:12px;color:#94a3b8;margin:0;">Sent by GaragePulse CRM</p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const text = `Hi ${name},\n\nWe received a request to reset your GaragePulse password. This link expires in 30 minutes.\n\n${resetUrl}\n\nIf you didn't request this, you can safely ignore this email — your password won't be changed.`;
+
+  return sendEmail({ to, subject, html, text });
+};

@@ -16,7 +16,8 @@ vi.mock('../services/emailService', () => ({
   initTransport: vi.fn().mockResolvedValue(null),
   sendEmail: vi.fn().mockResolvedValue({ logged: true, messageId: null }),
   sendServiceReminder: vi.fn().mockResolvedValue({ skipped: true, reason: 'test' }),
-  sendEstimationEmail: vi.fn().mockResolvedValue({ skipped: true, reason: 'test' })
+  sendEstimationEmail: vi.fn().mockResolvedValue({ skipped: true, reason: 'test' }),
+  sendPasswordResetEmail: vi.fn().mockResolvedValue({ skipped: true, reason: 'test' })
 }));
 
 vi.mock('../services/smsService', () => ({
