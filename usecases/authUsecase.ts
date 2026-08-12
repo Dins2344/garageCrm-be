@@ -62,8 +62,11 @@ export const authenticateUser = async ({ email, password }: AuthenticateInput): 
     throw new HttpError('Please provide email and password', 400);
   }
 
-  // Check for user
-  const user = await User.findOne({ email }).select('+password').populate('garage');
+  // Check for user. Deliberately NOT populating `garage` here — the client-side
+  // User type (web and mobile) expects garage as a plain id string, matching
+  // what /auth/register already returns; populating it silently breaks any
+  // string comparison against garage ids (e.g. the mobile branch switcher).
+  const user = await User.findOne({ email }).select('+password');
   if (!user) {
     throw new HttpError('Invalid credentials', 401);
   }
