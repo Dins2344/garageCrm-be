@@ -1,8 +1,10 @@
+import crypto from 'crypto';
 import User, { IUser } from '../models/User';
 import Garage from '../models/Garage';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { Role } from '../types/domain';
+import { sendPasswordResetEmail } from '../services/emailService';
 
 const log = logger.child('AuthUsecase');
 
@@ -116,5 +118,70 @@ export const changeUserPassword = async ({ userId, currentPassword, newPassword 
 
   user.password = newPassword;
   await user.save();
+  return true;
+};
+
+interface ForgotPasswordInput {
+  email: string;
+  frontendUrl: string;
+}
+
+type ForgotPasswordStatus = 'sent' | 'staff-managed' | 'not-found';
+
+/**
+ * Only owners can self-service reset their password by email — staff accounts
+ * are managed by their garage's owner (who can already set a new password for
+ * them directly via the Edit Staff flow), so this deliberately does not issue
+ * a token for non-owner roles. The caller maps the status to a user-facing
+ * message; 'sent' and 'not-found' should render identically so this endpoint
+ * can't be used to enumerate valid owner emails.
+ */
+export const forgotPassword = async ({ email, frontendUrl }: ForgotPasswordInput): Promise<{ status: ForgotPasswordStatus }> => {
+  const user = await User.findOne({ email });
+  if (!user) {
+    return { status: 'not-found' };
+  }
+  if (user.role !== 'owner') {
+    return { status: 'staff-managed' };
+  }
+
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  user.resetPasswordToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+  user.resetPasswordExpire = new Date(Date.now() + 30 * 60 * 1000);
+  await user.save();
+
+  await sendPasswordResetEmail({
+    to: user.email,
+    name: user.name,
+    resetUrl: `${frontendUrl}/reset-password/${rawToken}`
+  });
+
+  log.info('Password reset email sent', { userId: user._id });
+  return { status: 'sent' };
+};
+
+interface ResetPasswordInput {
+  token: string;
+  newPassword: string;
+}
+
+export const resetPassword = async ({ token, newPassword }: ResetPasswordInput): Promise<true> => {
+  const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+  const user = await User.findOne({
+    resetPasswordToken: hashedToken,
+    resetPasswordExpire: { $gt: new Date() }
+  }).select('+resetPasswordToken +resetPasswordExpire');
+
+  if (!user) {
+    throw new HttpError('This reset link is invalid or has expired.', 400);
+  }
+
+  user.password = newPassword;
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpire = undefined;
+  await user.save();
+
+  log.info('Password reset successfully', { userId: user._id });
   return true;
 };
