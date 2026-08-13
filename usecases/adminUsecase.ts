@@ -156,6 +156,82 @@ export const getAllUsers = async () => {
   return users;
 };
 
+export interface DeleteUserResult {
+  deletedUser: { id: string; email: string; role: string };
+  cascadedGarages?: number;
+  cascadedCounts?: {
+    users: number;
+    customers: number;
+    vehicles: number;
+    jobCards: number;
+    invoices: number;
+    inventory: number;
+    reminders: number;
+  };
+}
+
+/**
+ * Delete a platform user.
+ *
+ * - Staff (non-owner): deletes just that user record. Old records that
+ *   reference them (assignedMechanic, uploadedBy, invoice.createdBy, ...)
+ *   are left as-is — they'll simply show as an unknown/removed staff member.
+ * - Owner: an owner-less garage can't exist in this app's model, so this
+ *   cascades — every garage (branch) they own, and everything scoped to
+ *   those garages (customers, vehicles, job cards, invoices, inventory,
+ *   reminders, and any staff assigned to those branches), is deleted too.
+ *   Not wrapped in a transaction: this codebase's tests run against a
+ *   standalone Mongo instance (no replica set), which doesn't support them.
+ */
+export const deleteUser = async (userId: string): Promise<DeleteUserResult> => {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new HttpError('User not found', 404);
+  }
+
+  if (user.role !== 'owner') {
+    await User.findByIdAndDelete(userId);
+    log.warn('Admin deleted a staff user', { userId, email: user.email, role: user.role });
+    return { deletedUser: { id: String(user._id), email: user.email, role: user.role } };
+  }
+
+  const garages = await Garage.find({ owner: userId }).select('_id');
+  const garageIds = garages.map(g => g._id);
+
+  const [customers, vehicles, jobCards, invoices, inventory, reminders, users] = await Promise.all([
+    Customer.deleteMany({ garage: { $in: garageIds } }),
+    Vehicle.deleteMany({ garage: { $in: garageIds } }),
+    JobCard.deleteMany({ garage: { $in: garageIds } }),
+    Invoice.deleteMany({ garage: { $in: garageIds } }),
+    Inventory.deleteMany({ garage: { $in: garageIds } }),
+    ServiceReminder.deleteMany({ garage: { $in: garageIds } }),
+    // $or also matches the owner by _id in case their own `garage` field
+    // somehow doesn't point at one of their own branches.
+    User.deleteMany({ $or: [{ garage: { $in: garageIds } }, { _id: userId }] })
+  ]);
+
+  await Garage.deleteMany({ _id: { $in: garageIds } });
+
+  log.warn('Admin cascade-deleted an owner and their garage(s)', {
+    userId, email: user.email, garageCount: garageIds.length,
+    counts: {
+      users: users.deletedCount, customers: customers.deletedCount, vehicles: vehicles.deletedCount,
+      jobCards: jobCards.deletedCount, invoices: invoices.deletedCount, inventory: inventory.deletedCount,
+      reminders: reminders.deletedCount
+    }
+  });
+
+  return {
+    deletedUser: { id: String(user._id), email: user.email, role: user.role },
+    cascadedGarages: garageIds.length,
+    cascadedCounts: {
+      users: users.deletedCount, customers: customers.deletedCount, vehicles: vehicles.deletedCount,
+      jobCards: jobCards.deletedCount, invoices: invoices.deletedCount, inventory: inventory.deletedCount,
+      reminders: reminders.deletedCount
+    }
+  };
+};
+
 /**
  * Return system health info: process memory, CPU, DB connection, platform metadata.
  */

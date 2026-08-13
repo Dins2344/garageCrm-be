@@ -67,6 +67,21 @@ export const getUsers = async (req: Request, res: Response, next: NextFunction):
   }
 };
 
+// @desc    Delete a platform user — cascades to their entire garage if they're an owner
+// @route   DELETE /api/admin/users/:id
+export const deleteUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.params.id as string;
+    log.warn('Admin delete-user request', { adminEmail: req.admin?.email, userId });
+    const result = await adminUsecase.deleteUser(userId);
+    log.warn('Admin delete-user completed', { adminEmail: req.admin?.email, userId, result });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    log.error('Admin delete-user failed', { adminEmail: req.admin?.email, error: (error as Error).message });
+    next(error);
+  }
+};
+
 // @desc    System health info
 // @route   GET /api/admin/health
 export const getHealth = (req: Request, res: Response, next: NextFunction): void => {

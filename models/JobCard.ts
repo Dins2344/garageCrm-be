@@ -161,7 +161,7 @@ const jobCardSchema = new Schema<IJobCard>({
   // Odometer at intake
   odometerAtIntake: {
     type: Number,
-    default: 0
+    required: [true, 'Odometer reading is required']
   },
   // Expected & actual dates
   expectedDeliveryDate: {

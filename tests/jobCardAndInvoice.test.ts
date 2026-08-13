@@ -35,11 +35,22 @@ describe('Job card lifecycle + invoice billing', () => {
     inventoryItemId = item.body.data._id;
   });
 
-  it('creates a job card, saves an estimation with correct totals, and generates an invoice', async () => {
+  it('rejects job card creation without an odometer reading', async () => {
     const jobCard = await request(app)
       .post('/api/jobcards')
       .set(authHeader(token))
       .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId });
+
+    expect(jobCard.status).toBe(400);
+    expect(jobCard.body.success).toBe(false);
+    expect(jobCard.body.message).toMatch(/odometer/i);
+  });
+
+  it('creates a job card, saves an estimation with correct totals, and generates an invoice', async () => {
+    const jobCard = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId, odometerAtIntake: 10000 });
     expect(jobCard.status).toBe(201);
     const jobCardId = jobCard.body.data._id;
 
@@ -99,7 +110,7 @@ describe('Job card lifecycle + invoice billing', () => {
     const jobCard = await request(app)
       .post('/api/jobcards')
       .set(authHeader(token))
-      .send({ serviceType: 'repair', vehicle: vehicleId, customer: customerId });
+      .send({ serviceType: 'repair', vehicle: vehicleId, customer: customerId, odometerAtIntake: 10000 });
     const jobCardId = jobCard.body.data._id;
 
     const cancel = await request(app)
@@ -120,7 +131,7 @@ describe('Job card lifecycle + invoice billing', () => {
     const jobCard = await request(app)
       .post('/api/jobcards')
       .set(authHeader(token))
-      .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId });
+      .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId, odometerAtIntake: 10000 });
     const jobCardId = jobCard.body.data._id;
 
     const send = await request(app)
