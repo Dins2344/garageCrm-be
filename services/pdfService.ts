@@ -16,10 +16,16 @@ interface PDFLabor {
   total?: number;
 }
 
+interface PDFCustomerAddress {
+  street?: string;
+  city?: string;
+}
+
 interface PDFCustomer {
   name?: string;
   phone?: string;
   email?: string;
+  address?: PDFCustomerAddress;
 }
 
 interface PDFVehicle {
@@ -50,6 +56,7 @@ interface PDFData {
   paidAt?: Date | string | null;
   customer?: PDFCustomer;
   vehicle?: PDFVehicle;
+  odometerAtIntake?: number;
   parts?: PDFPart[];
   labor?: PDFLabor[];
   discount?: number;
@@ -64,6 +71,7 @@ interface PDFJobCard {
   jobCardNumber: string;
   customer?: PDFCustomer;
   vehicle?: PDFVehicle;
+  odometerAtIntake?: number;
   createdAt: Date | string;
   estimation: PDFData;
 }
@@ -85,6 +93,7 @@ export const generateEstimationPDF = (jobCard: PDFJobCard, garage: PDFGarage | n
     invoiceNumber: jobCard.jobCardNumber, // Use JC number as reference
     customer: jobCard.customer,
     vehicle: jobCard.vehicle,
+    odometerAtIntake: jobCard.odometerAtIntake,
     createdAt: jobCard.createdAt,
     isEstimation: true
   };
@@ -139,6 +148,8 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
       doc.fontSize(9).font('Helvetica').fillColor('#475569');
       if (data.customer?.phone) { doc.text(`Phone: ${data.customer.phone}`, 50, infoY); infoY += 13; }
       if (data.customer?.email) { doc.text(`Email: ${data.customer.email}`, 50, infoY); infoY += 13; }
+      const customerPlace = [data.customer?.address?.street, data.customer?.address?.city].filter(Boolean).join(', ');
+      if (customerPlace) { doc.text(customerPlace, 50, infoY); infoY += 13; }
 
       let vehicleY = lineY + 15;
       doc.fontSize(9).font('Helvetica-Bold').fillColor('#94a3b8').text('VEHICLE', 350, vehicleY);
@@ -148,6 +159,10 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
       doc.fontSize(9).font('Helvetica').fillColor('#475569').text(`${data.vehicle?.make || ''} ${data.vehicle?.model || ''} ${data.vehicle?.year ? `(${data.vehicle.year})` : ''}`.trim(), 350, vehicleY);
       vehicleY += 13;
       if (data.vehicle?.color) { doc.text(`Color: ${data.vehicle.color}`, 350, vehicleY); vehicleY += 13; }
+      if (data.odometerAtIntake !== undefined && data.odometerAtIntake !== null) {
+        doc.text(`Kilometers Run: ${Number(data.odometerAtIntake).toLocaleString('en-IN')} km`, 350, vehicleY);
+        vehicleY += 13;
+      }
 
       // ===== TABLES (Parts & Labor) =====
       let tableY = Math.max(infoY, vehicleY) + 20;
@@ -235,7 +250,7 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
       }
 
       doc.fillColor('#475569');
-      doc.text(`Tax (${data.taxRate || 18}%)`, totalsX, tableY, { width: totalsWidth - 90 });
+      doc.text(`Tax (${data.taxRate ?? 18}%)`, totalsX, tableY, { width: totalsWidth - 90 });
       doc.text(formatCurrency(data.taxAmount), totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
       tableY += 20;
 

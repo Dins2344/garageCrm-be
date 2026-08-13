@@ -86,7 +86,7 @@ describe('Multi-tenant isolation', () => {
     const jobCard = await request(app)
       .post('/api/jobcards')
       .set(authHeader(garageA.token))
-      .send({ serviceType: 'service', vehicle: vehicle.body.data._id, customer: customer.body.data._id });
+      .send({ serviceType: 'service', vehicle: vehicle.body.data._id, customer: customer.body.data._id, odometerAtIntake: 10000 });
     expect(jobCard.status).toBe(201);
 
     const crossRead = await request(app)
@@ -201,14 +201,14 @@ describe('Free-plan usage limits', () => {
       const res = await request(app)
         .post('/api/jobcards')
         .set(authHeader(owner.token))
-        .send({ serviceType: 'service', vehicle: vehicle.body.data._id, customer: customer.body.data._id });
+        .send({ serviceType: 'service', vehicle: vehicle.body.data._id, customer: customer.body.data._id, odometerAtIntake: 10000 });
       expect(res.status).toBe(201);
     }
 
     const fourth = await request(app)
       .post('/api/jobcards')
       .set(authHeader(owner.token))
-      .send({ serviceType: 'service', vehicle: vehicle.body.data._id, customer: customer.body.data._id });
+      .send({ serviceType: 'service', vehicle: vehicle.body.data._id, customer: customer.body.data._id, odometerAtIntake: 10000 });
     expect(fourth.status).toBe(403);
   });
 
@@ -232,7 +232,8 @@ describe('Free-plan usage limits', () => {
         vehicle: vehicle.body.data._id,
         customer: customer.body.data._id,
         garage: owner.garageId,
-        createdBy: owner.userId
+        createdBy: owner.userId,
+        odometerAtIntake: 10000
       });
       jobCardIds.push(jc._id.toString());
     }

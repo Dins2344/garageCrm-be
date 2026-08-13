@@ -53,7 +53,7 @@ export const getInvoiceDetails = async ({ invoiceId, garageId }: GetDetailsInput
   const invoice = await Invoice.findOne({ _id: invoiceId, garage: garageId })
     .populate('customer')
     .populate('vehicle')
-    .populate('jobCard', 'jobCardNumber status')
+    .populate('jobCard', 'jobCardNumber status odometerAtIntake')
     .populate('garage', 'name address phone email gstNumber')
     .populate('parts.inventoryItem', 'partName partNumber')
     .populate('createdBy', 'name')
@@ -247,7 +247,12 @@ export const generateInvoicePDFBuffer = async ({ invoiceId, garageId }: PdfInput
     throw new HttpError('Garage not found', 404);
   }
 
-  const buffer = await pdfService.generateInvoicePDF(invoice as unknown as Parameters<typeof pdfService.generateInvoicePDF>[0], garage);
+  // `jobCard` is populated with just a few fields for the PDF — odometerAtIntake
+  // reflects the reading at the time of *this* service, unlike the vehicle's
+  // own currentOdometerReading which may have moved on since.
+  const odometerAtIntake = (invoice.jobCard as unknown as { odometerAtIntake?: number } | undefined)?.odometerAtIntake;
+  const pdfData = { ...invoice, odometerAtIntake };
+  const buffer = await pdfService.generateInvoicePDF(pdfData as unknown as Parameters<typeof pdfService.generateInvoicePDF>[0], garage);
   log.info('Invoice PDF generated successfully', { invoiceId, invoiceNumber: invoice.invoiceNumber, bytes: buffer.length });
 
   return { buffer, invoiceNumber: invoice.invoiceNumber };

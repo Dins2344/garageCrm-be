@@ -34,6 +34,7 @@ router.get('/verify',  adminController.verify);
 router.get('/stats',   adminController.getStats);
 router.get('/garages', adminController.getGarages);
 router.get('/users',   adminController.getUsers);
+router.delete('/users/:id', adminController.deleteUser);
 router.get('/health',  adminController.getHealth);
 
 export default router;
