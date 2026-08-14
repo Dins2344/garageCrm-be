@@ -27,6 +27,7 @@ import dashboardRoutes from './routes/dashboard';
 import reminderRoutes from './routes/reminders';
 import garageRoutes from './routes/garage';
 import publicRoutes from './routes/public';
+import metaRoutes from './routes/meta';
 import adminRoutes from './routes/admin';
 
 const app = express();
@@ -87,6 +88,7 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reminders', reminderRoutes);
 app.use('/api/garage', garageRoutes);
+app.use('/api/meta', metaRoutes);     // No auth — static reference data
 app.use('/api/public', publicRoutes); // No auth — token-secured
 app.use('/api/admin', adminRoutes);   // Platform-wide admin
 

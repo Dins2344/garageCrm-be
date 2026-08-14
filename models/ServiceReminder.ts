@@ -13,6 +13,7 @@ export interface IServiceReminder extends Document {
   notes: string;
   status: ReminderStatus;
   reminderSentAt: Date | null;
+  lastAttemptAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,6 +61,16 @@ const serviceReminderSchema = new Schema<IServiceReminder>({
     default: 'pending'
   },
   reminderSentAt: {
+    type: Date,
+    default: null
+  },
+  // When the cron last TRIED to send this reminder, successful or not.
+  // Distinct from reminderSentAt: the reminder job now runs hourly (so it can
+  // hit 09:00 in every garage's own timezone), and a reminder whose customer
+  // has neither an email nor a phone stays 'pending' forever. Without this,
+  // a restart inside the same local hour would re-attempt and append another
+  // failure note. Never `required` — old documents simply have no key.
+  lastAttemptAt: {
     type: Date,
     default: null
   }

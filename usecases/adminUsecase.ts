@@ -10,6 +10,7 @@ import Invoice from '../models/Invoice';
 import Inventory from '../models/Inventory';
 import ServiceReminder from '../models/ServiceReminder';
 import logger from '../utils/logger';
+import { resolveGarageLocale } from '../utils/locale';
 import { HttpError } from '../utils/httpError';
 import { AdminTokenPayload } from '../types/express';
 
@@ -132,6 +133,9 @@ export const getAllGarages = async () => {
 
       return {
         ...g,
+        // Each row's revenue is in ITS OWN currency — the admin list spans
+        // every tenant, so there is no single currency to render it in.
+        locale: resolveGarageLocale(g),
         _counts: { users: userCount, customers: customerCount, jobCards: jobCardCount, invoices: invoiceCount },
         _revenue: revAgg[0]?.total || 0
       };

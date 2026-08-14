@@ -5,6 +5,9 @@ import Garage from '../models/Garage';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { Role } from '../types/domain';
+import { COUNTRIES, DEFAULT_COUNTRY, isSupportedCountry } from '../config/countries';
+import { isValidPhoneForCountry } from '../utils/phone';
+import { isValidTimezone } from '../utils/locale';
 import { sendPasswordResetEmail } from '../services/emailService';
 
 const log = logger.child('AuthUsecase');
@@ -17,10 +20,49 @@ interface RegisterInput {
   garageName?: string;
   garagePhone?: string;
   garageAddress?: Record<string, unknown>;
+  country?: string;
+  /** Only meaningful for countries spanning several zones (US/CA/AU). */
+  timezone?: string;
 }
 
 export const registerNewGarage = async (userData: RegisterInput): Promise<{ user: IUser; token: string }> => {
   const { name, email, phone, password, garageName, garagePhone, garageAddress } = userData;
+
+  // Default to India so existing clients that don't send a country keep the
+  // behaviour they've always had.
+  const requestedCountry = userData.country?.toUpperCase();
+  if (requestedCountry && !isSupportedCountry(requestedCountry)) {
+    throw new HttpError(`Unsupported country: ${requestedCountry}`, 400);
+  }
+  const country = isSupportedCountry(requestedCountry) ? requestedCountry : DEFAULT_COUNTRY;
+  const countryDefaults = COUNTRIES[country];
+
+  // Country-aware phone validation lives here, not on the schema: the User
+  // model can't see which country the garage is being created in at validate
+  // time. It also restores a check India lost — the old schema regex
+  // `/^[6-9]\d{9}$/` was deliberately loosened so non-Indian numbers could be
+  // stored, which left nothing rejecting malformed input. This is the only
+  // gate, so it has to be here rather than nowhere.
+  if (!isValidPhoneForCountry(phone, country)) {
+    throw new HttpError(
+      `Please enter a valid phone number for ${countryDefaults.name} (e.g. ${countryDefaults.phoneExample}).`,
+      400
+    );
+  }
+  if (garagePhone && !isValidPhoneForCountry(garagePhone, country)) {
+    throw new HttpError(
+      `Please enter a valid garage phone number for ${countryDefaults.name} (e.g. ${countryDefaults.phoneExample}).`,
+      400
+    );
+  }
+
+  // Ignored for single-zone countries — the country table is authoritative
+  // there, and storing a redundant override would freeze it against fixes.
+  const timezone =
+    countryDefaults.timezone === null && userData.timezone ? userData.timezone.trim() : '';
+  if (timezone && !isValidTimezone(timezone)) {
+    throw new HttpError(`Unrecognised timezone: ${userData.timezone}`, 400);
+  }
 
   // Check if user exists
   const existingUser = await User.findOne({ email });
@@ -55,7 +97,18 @@ export const registerNewGarage = async (userData: RegisterInput): Promise<{ user
       name: garageName || `${name}'s Garage`,
       phone: garagePhone || phone,
       address: garageAddress || {},
-      owner: user._id
+      owner: user._id,
+      country,
+      // Seeded once from the country, then owned by the garage — see the note
+      // in config/countries.ts on why these must not track the table.
+      settings: {
+        taxRate: countryDefaults.defaultTaxRate,
+        laborRatePerHour: countryDefaults.defaultLaborRatePerHour,
+        // Only stored when the country has no single zone of its own; for
+        // everywhere else '' means "inherit from the country table", so a
+        // later correction to that table reaches existing garages.
+        ...(timezone ? { timezone } : {})
+      }
     });
   } catch (err) {
     await User.findByIdAndDelete(user._id);

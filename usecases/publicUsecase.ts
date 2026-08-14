@@ -1,6 +1,7 @@
 import JobCard from '../models/JobCard';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
+import { resolveGarageLocale } from '../utils/locale';
 
 const log = logger.child('PublicUsecase');
 
@@ -11,16 +12,20 @@ const log = logger.child('PublicUsecase');
  */
 export const getEstimationByToken = async (token: string) => {
   const jobCard = await JobCard.findOne({ estimationToken: token })
+    // `country settings` are needed so the (unauthenticated) approval page can
+    // format money in the garage's currency instead of assuming rupees.
     .populate('vehicle', 'licensePlate make model year color fuelType')
     .populate('customer', 'name phone email')
-    .populate('garage', 'name phone email address')
+    .populate('garage', 'name phone email address country settings')
     .lean();
 
   if (!jobCard) {
     throw new HttpError('This estimation link is invalid or has expired.', 404);
   }
 
-  return jobCard;
+  // Resolved here rather than on the client — this page has no session and so
+  // no other route to the garage's locale.
+  return { ...jobCard, locale: resolveGarageLocale(jobCard.garage as Parameters<typeof resolveGarageLocale>[0]) };
 };
 
 /**
