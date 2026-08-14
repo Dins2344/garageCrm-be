@@ -8,7 +8,7 @@ import { sendEstimationEmail } from '../services/emailService';
 import * as pdfService from '../services/pdfService';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
-import { JobStatus, Role } from '../types/domain';
+import { JobStatus, Role, TERMINAL_JOB_STATUSES } from '../types/domain';
 import { FREE_PLAN_LIMITS } from '../config/planLimits';
 
 const log = logger.child('JobCardUsecase');
@@ -98,6 +98,26 @@ export const openJobCard = async ({ jobCardData, garageId, userId }: OpenInput) 
       `Daily job card limit reached (${FREE_PLAN_LIMITS.maxJobCardsPerGaragePerDay}/day) on the free plan.`,
       403
     );
+  }
+
+  // A vehicle can only have one job card open at a time within a garage —
+  // otherwise the same car ends up on two parallel workflows (two
+  // estimations, two invoices). The existing one must reach a terminal state
+  // (delivered or cancelled) before a new one can be opened.
+  if (jobCardData.vehicle) {
+    const activeJobCard = await JobCard.findOne({
+      garage: garageId,
+      vehicle: jobCardData.vehicle,
+      status: { $nin: TERMINAL_JOB_STATUSES }
+    }).select('jobCardNumber status');
+
+    if (activeJobCard) {
+      throw new HttpError(
+        `This vehicle already has an open job card (${activeJobCard.jobCardNumber}). ` +
+        'Deliver or cancel it before creating a new one.',
+        409
+      );
+    }
   }
 
   const data = {

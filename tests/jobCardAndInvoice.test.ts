@@ -77,6 +77,95 @@ describe('Job card lifecycle + invoice billing', () => {
     expect(jobCard.body.data.odometerAtIntake).toBe(42);
   });
 
+  it('blocks a second job card for a vehicle that already has an open one', async () => {
+    const first = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId, odometerAtIntake: 10000 });
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'repair', vehicle: vehicleId, customer: customerId, odometerAtIntake: 10500 });
+
+    expect(second.status).toBe(409);
+    expect(second.body.success).toBe(false);
+    // The message names the blocking job card so the user can go find it.
+    expect(second.body.message).toContain(first.body.data.jobCardNumber);
+  });
+
+  it('allows a new job card once the previous one is cancelled', async () => {
+    const first = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId, odometerAtIntake: 10000 });
+    expect(first.status).toBe(201);
+
+    const cancel = await request(app)
+      .put(`/api/jobcards/${first.body.data._id}`)
+      .set(authHeader(token))
+      .send({ status: 'cancelled' });
+    expect(cancel.status).toBe(200);
+
+    const second = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'repair', vehicle: vehicleId, customer: customerId, odometerAtIntake: 10500 });
+
+    expect(second.status).toBe(201);
+  });
+
+  it('allows a new job card once the previous one is delivered', async () => {
+    const first = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId, odometerAtIntake: 10000 });
+    const firstId = first.body.data._id;
+
+    // Delivery is gated on having an invoice, so run the real flow through.
+    await request(app)
+      .put(`/api/jobcards/${firstId}/estimation`)
+      .set(authHeader(token))
+      .send({ parts: [], labor: [{ description: 'Service', hours: 1, ratePerHour: 500 }], discount: 0, taxRate: 18 });
+    const invoice = await request(app)
+      .post('/api/invoices')
+      .set(authHeader(token))
+      .send({ jobCardId: firstId });
+    expect(invoice.status).toBe(201);
+
+    // Generating the invoice moves the job card to `delivered`.
+    const afterInvoice = await request(app).get(`/api/jobcards/${firstId}`).set(authHeader(token));
+    expect(afterInvoice.body.data.status).toBe('delivered');
+
+    const second = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'repair', vehicle: vehicleId, customer: customerId, odometerAtIntake: 10500 });
+
+    expect(second.status).toBe(201);
+  });
+
+  it('does not block a different vehicle in the same garage', async () => {
+    const first = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId, odometerAtIntake: 10000 });
+    expect(first.status).toBe(201);
+
+    const otherVehicle = await request(app)
+      .post('/api/vehicles')
+      .set(authHeader(token))
+      .send({ licensePlate: 'MH01ZZ2222', make: 'Honda', model: 'Amaze', customer: customerId });
+
+    const second = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'repair', vehicle: otherVehicle.body.data._id, customer: customerId, odometerAtIntake: 8000 });
+
+    expect(second.status).toBe(201);
+  });
+
   it('creates a job card, saves an estimation with correct totals, and generates an invoice', async () => {
     const jobCard = await request(app)
       .post('/api/jobcards')

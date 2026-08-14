@@ -192,23 +192,31 @@ describe('Free-plan usage limits', () => {
       .post('/api/customers')
       .set(authHeader(owner.token))
       .send({ name: 'JC Quota Cust', phone: nextPhone() });
-    const vehicle = await request(app)
-      .post('/api/vehicles')
-      .set(authHeader(owner.token))
-      .send({ licensePlate: 'MH01QC0001', make: 'Maruti', model: 'Swift', customer: customer.body.data._id });
+
+    // One vehicle per job card: a vehicle may only have one *open* job card
+    // at a time (see jobCardUsecase.openJobCard), so reusing a single vehicle
+    // here would trip that rule instead of the daily cap under test.
+    const vehicleIds: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const vehicle = await request(app)
+        .post('/api/vehicles')
+        .set(authHeader(owner.token))
+        .send({ licensePlate: `MH01QC000${i + 1}`, make: 'Maruti', model: 'Swift', customer: customer.body.data._id });
+      vehicleIds.push(vehicle.body.data._id);
+    }
 
     for (let i = 0; i < 3; i++) {
       const res = await request(app)
         .post('/api/jobcards')
         .set(authHeader(owner.token))
-        .send({ serviceType: 'service', vehicle: vehicle.body.data._id, customer: customer.body.data._id, odometerAtIntake: 10000 });
+        .send({ serviceType: 'service', vehicle: vehicleIds[i], customer: customer.body.data._id, odometerAtIntake: 10000 });
       expect(res.status).toBe(201);
     }
 
     const fourth = await request(app)
       .post('/api/jobcards')
       .set(authHeader(owner.token))
-      .send({ serviceType: 'service', vehicle: vehicle.body.data._id, customer: customer.body.data._id, odometerAtIntake: 10000 });
+      .send({ serviceType: 'service', vehicle: vehicleIds[3], customer: customer.body.data._id, odometerAtIntake: 10000 });
     expect(fourth.status).toBe(403);
   });
 
