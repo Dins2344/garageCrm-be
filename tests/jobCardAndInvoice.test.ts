@@ -46,6 +46,37 @@ describe('Job card lifecycle + invoice billing', () => {
     expect(jobCard.body.message).toMatch(/odometer/i);
   });
 
+  it('rejects an implausibly large odometer reading (mis-keyed / duplicated digits)', async () => {
+    const jobCard = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId, odometerAtIntake: 232323232 });
+
+    expect(jobCard.status).toBe(400);
+    expect(jobCard.body.success).toBe(false);
+    expect(jobCard.body.message).toMatch(/odometer/i);
+  });
+
+  it('rejects a negative odometer reading', async () => {
+    const jobCard = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId, odometerAtIntake: -5 });
+
+    expect(jobCard.status).toBe(400);
+    expect(jobCard.body.success).toBe(false);
+  });
+
+  it('accepts a small, genuine two-digit odometer reading', async () => {
+    const jobCard = await request(app)
+      .post('/api/jobcards')
+      .set(authHeader(token))
+      .send({ serviceType: 'service', vehicle: vehicleId, customer: customerId, odometerAtIntake: 42 });
+
+    expect(jobCard.status).toBe(201);
+    expect(jobCard.body.data.odometerAtIntake).toBe(42);
+  });
+
   it('creates a job card, saves an estimation with correct totals, and generates an invoice', async () => {
     const jobCard = await request(app)
       .post('/api/jobcards')
