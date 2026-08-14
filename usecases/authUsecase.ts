@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 import User, { IUser } from '../models/User';
 import Garage from '../models/Garage';
 import logger from '../utils/logger';
@@ -27,26 +28,39 @@ export const registerNewGarage = async (userData: RegisterInput): Promise<{ user
     throw new HttpError('Email already registered', 400);
   }
 
-  // 1. Create Garage first
-  const garage = await Garage.create({
-    name: garageName || `${name}'s Garage`,
-    phone: garagePhone || phone,
-    address: garageAddress || {}
-  });
-
-  // 2. Create User as Owner
+  // Create User first, referencing a pre-generated Garage id, then create the
+  // Garage with `owner` already set in the same call — so the two documents
+  // are never in an inconsistent state relative to each other. Previously
+  // this created the Garage first and linked `owner` afterwards in a third
+  // step; if User.create() failed in between (a validation error, or two
+  // concurrent signups racing past the duplicate-email check above and both
+  // colliding on the unique index), the Garage was already committed and
+  // left permanently ownerless. This ordering means a User.create() failure
+  // happens before anything else exists, and a Garage.create() failure rolls
+  // back the User — either both exist and are linked, or neither does.
+  const garageId = new mongoose.Types.ObjectId();
   const user = await User.create({
     name,
     email,
     phone,
     password,
     role: 'owner' as Role,
-    garage: garage._id
+    garage: garageId
   });
 
-  // 3. Update Garage with owner ID
-  garage.owner = user._id;
-  await garage.save();
+  let garage;
+  try {
+    garage = await Garage.create({
+      _id: garageId,
+      name: garageName || `${name}'s Garage`,
+      phone: garagePhone || phone,
+      address: garageAddress || {},
+      owner: user._id
+    });
+  } catch (err) {
+    await User.findByIdAndDelete(user._id);
+    throw err;
+  }
 
   log.info('New garage and owner registered', { garageId: garage._id, userId: user._id });
 

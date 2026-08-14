@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import app from '../app';
+import Garage from '../models/Garage';
+import User from '../models/User';
 import { registerGarageOwner, nextPhone, authHeader } from './helpers/factories';
 
 describe('Auth', () => {
@@ -20,6 +22,51 @@ describe('Auth', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
+  });
+
+  it('leaves no orphaned, ownerless garage behind when user creation fails validation', async () => {
+    const garageName = 'Orphan Check Garage';
+    const res = await request(app).post('/api/auth/register').send({
+      name: 'Bad Password Owner',
+      email: 'badpassword@example.com',
+      phone: nextPhone(),
+      password: 'short', // below the 6-char minimum -> User.create() throws
+      garageName,
+      garagePhone: nextPhone()
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+
+    const orphanedGarage = await Garage.findOne({ name: garageName });
+    expect(orphanedGarage).toBeNull();
+  });
+
+  it('leaves no orphaned garage when two concurrent signups race on the same email', async () => {
+    const email = 'race@example.com';
+    const attempt = (garageName: string) => request(app).post('/api/auth/register').send({
+      name: 'Racer',
+      email,
+      phone: nextPhone(),
+      password: 'password123',
+      garageName,
+      garagePhone: nextPhone()
+    });
+
+    const [first, second] = await Promise.all([attempt('Race Garage A'), attempt('Race Garage B')]);
+    const statuses = [first.status, second.status].sort();
+
+    // Exactly one of the two concurrent requests should succeed; the other
+    // loses the race on the unique email index and gets a clean error.
+    expect(statuses).toEqual([201, 400]);
+
+    const users = await User.find({ email });
+    expect(users).toHaveLength(1);
+
+    const garages = await Garage.find({ name: { $in: ['Race Garage A', 'Race Garage B'] } });
+    expect(garages).toHaveLength(1);
+    expect(garages[0].owner).toBeTruthy();
+    expect(String(garages[0].owner)).toBe(String(users[0]._id));
   });
 
   it('logs in with correct credentials', async () => {

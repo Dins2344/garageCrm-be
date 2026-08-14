@@ -143,6 +143,42 @@ export const getAllGarages = async () => {
 };
 
 /**
+ * Delete a garage that has no owner.
+ *
+ * This exists specifically for the ownerless-garage bug in registerNewGarage
+ * (fixed, but pre-existing/reproduced orphans still need cleanup): a garage
+ * left behind when User.create() failed after Garage.create() had already
+ * succeeded. Deliberately refuses to delete any garage that DOES have an
+ * owner — that's a real, active garage with real data, and deleting it is a
+ * much bigger, more deliberate action than this endpoint is for. Also wipes
+ * anything scoped to the garage (should normally be nothing, since no owner
+ * ever existed to create customers/vehicles/etc, but cheap to be thorough).
+ */
+export const deleteOrphanedGarage = async (garageId: string): Promise<{ deletedGarage: { id: string; name: string } }> => {
+  const garage = await Garage.findById(garageId);
+  if (!garage) {
+    throw new HttpError('Garage not found', 404);
+  }
+  if (garage.owner) {
+    throw new HttpError('Refusing to delete a garage that has an owner. This action is only for ownerless (orphaned) garages.', 400);
+  }
+
+  await Promise.all([
+    Customer.deleteMany({ garage: garageId }),
+    Vehicle.deleteMany({ garage: garageId }),
+    JobCard.deleteMany({ garage: garageId }),
+    Invoice.deleteMany({ garage: garageId }),
+    Inventory.deleteMany({ garage: garageId }),
+    ServiceReminder.deleteMany({ garage: garageId }),
+    User.deleteMany({ garage: garageId })
+  ]);
+  await Garage.findByIdAndDelete(garageId);
+
+  log.warn('Admin deleted an orphaned (ownerless) garage', { garageId, name: garage.name });
+  return { deletedGarage: { id: String(garage._id), name: garage.name } };
+};
+
+/**
  * Return all users (minus passwords) across all garages.
  */
 export const getAllUsers = async () => {
