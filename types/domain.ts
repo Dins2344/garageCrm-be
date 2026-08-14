@@ -16,6 +16,12 @@ export const JOB_STATUSES = [
 ] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
+// Statuses that close a job card out. A vehicle whose only job cards are in
+// one of these states is free to have a new one opened — see
+// jobCardUsecase.openJobCard, which blocks a second *active* job card for the
+// same vehicle.
+export const TERMINAL_JOB_STATUSES: readonly JobStatus[] = ['delivered', 'cancelled'];
+
 export const SERVICE_TYPES = ['service', 'repair', 'accident'] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 

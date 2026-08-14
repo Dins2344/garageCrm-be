@@ -161,7 +161,12 @@ const jobCardSchema = new Schema<IJobCard>({
   // Odometer at intake
   odometerAtIntake: {
     type: Number,
-    required: [true, 'Odometer reading is required']
+    required: [true, 'Odometer reading is required'],
+    min: [0, 'Odometer reading cannot be negative'],
+    // 9,999,999 km is far beyond any real vehicle — a value above this is a
+    // data-entry error (e.g. digits accidentally entered twice), not a
+    // genuine reading. Enforced here so no client can bypass it.
+    max: [9999999, 'Odometer reading looks too large — please check the value']
   },
   // Expected & actual dates
   expectedDeliveryDate: {
