@@ -160,3 +160,41 @@ describe('Admin: delete user', () => {
     expect(stillWorks.body.data.some((c: { name: string }) => c.name === 'Safe Customer')).toBe(true);
   });
 });
+
+describe('Admin: delete orphaned garage', () => {
+  it('returns 404 for a non-existent garage', async () => {
+    const adminToken = await adminLogin();
+    const res = await request(app)
+      .delete(`/api/admin/garages/${new mongoose.Types.ObjectId()}`)
+      .set(adminHeader(adminToken));
+
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('deletes a garage that has no owner', async () => {
+    const adminToken = await adminLogin();
+    const orphan = await Garage.create({ name: 'Orphan Test Garage', phone: nextPhone(), address: {} });
+
+    const del = await request(app)
+      .delete(`/api/admin/garages/${orphan._id}`)
+      .set(adminHeader(adminToken));
+
+    expect(del.status).toBe(200);
+    expect(del.body.data.deletedGarage.name).toBe('Orphan Test Garage');
+    expect(await Garage.findById(orphan._id)).toBeNull();
+  });
+
+  it('refuses to delete a garage that has an owner', async () => {
+    const owner = await createGarageWithOwner('admin-garage-protect');
+    const adminToken = await adminLogin();
+
+    const del = await request(app)
+      .delete(`/api/admin/garages/${owner.garageId}`)
+      .set(adminHeader(adminToken));
+
+    expect(del.status).toBe(400);
+    expect(del.body.success).toBe(false);
+    expect(await Garage.findById(owner.garageId)).not.toBeNull();
+  });
+});

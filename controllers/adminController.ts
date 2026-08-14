@@ -53,6 +53,21 @@ export const getGarages = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+// @desc    Delete a garage that has no owner (cleanup for orphaned garages)
+// @route   DELETE /api/admin/garages/:id
+export const deleteGarage = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const garageId = req.params.id as string;
+    log.warn('Admin delete-orphaned-garage request', { adminEmail: req.admin?.email, garageId });
+    const result = await adminUsecase.deleteOrphanedGarage(garageId);
+    log.warn('Admin delete-orphaned-garage completed', { adminEmail: req.admin?.email, garageId, result });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    log.error('Admin delete-orphaned-garage failed', { adminEmail: req.admin?.email, error: (error as Error).message });
+    next(error);
+  }
+};
+
 // @desc    Get all users across all garages
 // @route   GET /api/admin/users
 export const getUsers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {

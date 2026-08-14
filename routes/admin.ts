@@ -33,6 +33,7 @@ router.use(adminAuth);
 router.get('/verify',  adminController.verify);
 router.get('/stats',   adminController.getStats);
 router.get('/garages', adminController.getGarages);
+router.delete('/garages/:id', adminController.deleteGarage);
 router.get('/users',   adminController.getUsers);
 router.delete('/users/:id', adminController.deleteUser);
 router.get('/health',  adminController.getHealth);
