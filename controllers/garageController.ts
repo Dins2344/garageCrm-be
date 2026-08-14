@@ -61,3 +61,40 @@ export const createBranch = async (req: Request, res: Response, next: NextFuncti
     next(error);
   }
 };
+
+// @desc    List staff assigned to a specific branch — checked before deletion
+//          so the client knows whether to ask the owner what to do with them
+// @route   GET /api/garage/branches/:id/staff
+export const getBranchStaff = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const ownerId = req.user!._id;
+    const garageId = req.params.id as string;
+    const staff = await garageUsecase.getBranchStaff({ ownerId, garageId });
+    res.status(200).json({ success: true, data: staff });
+  } catch (error) {
+    log.error('Failed to fetch branch staff', { ownerId: req.user?._id, garageId: req.params.id, error: (error as Error).message });
+    next(error);
+  }
+};
+
+// @desc    Delete a branch (owner must have more than one; staffAction required
+//          if the branch has staff assigned)
+// @route   DELETE /api/garage/branches/:id
+export const deleteBranch = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const ownerId = req.user!._id;
+    const garageId = req.params.id as string;
+    log.warn('Owner delete-branch request', { ownerId, garageId, staffAction: req.body?.staffAction });
+    const result = await garageUsecase.deleteBranch({
+      ownerId,
+      garageId,
+      staffAction: req.body?.staffAction,
+      reassignToGarageId: req.body?.reassignToGarageId
+    });
+    log.warn('Owner delete-branch completed', { ownerId, garageId, result });
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    log.error('Failed to delete branch', { ownerId: req.user?._id, garageId: req.params.id, error: (error as Error).message });
+    next(error);
+  }
+};
