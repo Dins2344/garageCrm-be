@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
+import { DEFAULT_COUNTRY, SUPPORTED_COUNTRY_CODES } from '../config/countries';
 
 export interface IGarageAddress {
   street: string;
@@ -8,7 +9,12 @@ export interface IGarageAddress {
 }
 
 export interface IGarageSettings {
+  /** Presentation overrides — '' means "inherit from the country table". */
   currency: string;
+  locale: string;
+  taxLabel: string;
+  timezone: string;
+  /** Owned by the garage once seeded from its country at creation. */
   taxRate: number;
   laborRatePerHour: number;
   serviceReminderDays: number;
@@ -17,6 +23,8 @@ export interface IGarageSettings {
 export interface IGarage extends Document {
   _id: Types.ObjectId;
   name: string;
+  /** ISO 3166-1 alpha-2. Drives currency/locale/tax labels via config/countries.ts. */
+  country: string;
   address: IGarageAddress;
   phone: string;
   email: string;
@@ -35,6 +43,20 @@ const garageSchema = new Schema<IGarage>({
     trim: true,
     maxlength: [200, 'Name cannot exceed 200 characters']
   },
+  // Deliberately NOT `required`: updateGarageInfo runs with runValidators, so
+  // requiring it would make every pre-existing (country-less) garage fail
+  // validation on unrelated edits. resolveGarageLocale falls back to IN, so
+  // documents without this key already behave correctly.
+  country: {
+    type: String,
+    uppercase: true,
+    trim: true,
+    default: DEFAULT_COUNTRY,
+    enum: {
+      values: SUPPORTED_COUNTRY_CODES,
+      message: 'Unsupported country: {VALUE}'
+    }
+  },
   address: {
     street: { type: String, default: '' },
     city: { type: String, default: '' },
@@ -49,10 +71,16 @@ const garageSchema = new Schema<IGarage>({
     type: String,
     default: ''
   },
+  // Business tax registration number. Deliberately permissive: this holds a
+  // GSTIN in India, a VAT number in the UK/EU, an EIN in the US, an ABN in
+  // Australia — a country-specific regex here would reject every one of them.
+  // Format hints belong in the UI as soft guidance, not as a hard validator
+  // (updateGarageInfo runs with runValidators, so a strict rule would also
+  // start rejecting saves of pre-existing documents on unrelated edits).
   gstNumber: {
     type: String,
     default: '',
-    match: [/^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/, 'Invalid GST number']
+    match: [/^$|^[A-Za-z0-9\-/ ]{1,25}$/, 'Invalid tax registration number']
   },
   logo: {
     type: String,
@@ -63,8 +91,16 @@ const garageSchema = new Schema<IGarage>({
     ref: 'User'
   },
   settings: {
-    currency: { type: String, default: 'INR' },
-    taxRate: { type: Number, default: 18 }, // GST percentage
+    // Presentation overrides. '' = inherit from config/countries.ts via
+    // utils/locale.ts, so a table correction reaches every garage.
+    currency: { type: String, default: '' },
+    locale: { type: String, default: '' },
+    taxLabel: { type: String, default: '' },
+    timezone: { type: String, default: '' },
+    // Seeded from the garage's country at creation, then owner-owned. These
+    // must NOT track the country table — a tax-rate change in law must never
+    // retroactively rewrite an existing garage's configured rate.
+    taxRate: { type: Number, default: 18 },
     laborRatePerHour: { type: Number, default: 500 },
     serviceReminderDays: { type: Number, default: 180 } // 6 months default
   }

@@ -1,5 +1,8 @@
 import twilio, { Twilio } from 'twilio';
 import logger from '../utils/logger';
+import { formatPhoneE164 } from '../utils/phone';
+import { resolveGarageLocale, ResolvedLocale } from '../utils/locale';
+import { formatDate } from '../utils/format';
 const log = logger.child('SmsService');
 
 let twilioClient: Twilio | null = null;
@@ -36,6 +39,8 @@ export const isSmsConfigured = (): boolean => smsReady && twilioClient !== null;
 interface SendSmsInput {
   to: string;
   body: string;
+  /** Garage's country — how a bare local number gets its country code. */
+  country?: string;
 }
 
 interface SendSmsResult {
@@ -45,7 +50,7 @@ interface SendSmsResult {
 }
 
 // ───── Send Raw SMS ─────
-export const sendSms = async ({ to, body }: SendSmsInput): Promise<SendSmsResult> => {
+export const sendSms = async ({ to, body, country }: SendSmsInput): Promise<SendSmsResult> => {
   if (!isSmsConfigured() || !twilioClient) {
     log.info('SMS logged (Twilio not configured)', { to, body: body.slice(0, 80) });
     return { logged: true, sid: null };
@@ -57,10 +62,16 @@ export const sendSms = async ({ to, body }: SendSmsInput): Promise<SendSmsResult
     return { logged: true, sid: null };
   }
 
-  try {
-    // Ensure phone is in E.164 format (Indian numbers: +91XXXXXXXXXX)
-    const formattedTo = formatPhoneE164(to);
+  // Normalise to E.164 using the garage's country for bare local numbers.
+  // An empty result means "not a valid number" — skip rather than send to a
+  // guessed destination.
+  const formattedTo = formatPhoneE164(to, country);
+  if (!formattedTo) {
+    log.warn('Skipping SMS — phone number could not be validated', { country });
+    return { logged: true, sid: null };
+  }
 
+  try {
     const message = await twilioClient.messages.create({
       body,
       from: from.trim(),
@@ -77,30 +88,9 @@ export const sendSms = async ({ to, body }: SendSmsInput): Promise<SendSmsResult
 };
 
 // ───── Format Phone to E.164 ─────
-export const formatPhoneE164 = (phone: string): string => {
-  if (!phone) return '';
-
-  // Remove all non-digit characters
-  const digits = phone.replace(/\D/g, '');
-
-  // Already has country code (starts with 91 and is 12 digits)
-  if (digits.length === 12 && digits.startsWith('91')) {
-    return `+${digits}`;
-  }
-
-  // Indian 10-digit number — prepend +91
-  if (digits.length === 10) {
-    return `+91${digits}`;
-  }
-
-  // Already in E.164 format
-  if (phone.startsWith('+')) {
-    return phone;
-  }
-
-  // Fallback — prepend +91
-  return `+91${digits}`;
-};
+// Lives in utils/phone.ts so it's unit-testable (tests/setup.ts mocks this
+// whole module). Re-exported here to keep existing importers working.
+export { formatPhoneE164 };
 
 interface ServiceReminderSmsInput {
   customerName: string;
@@ -112,6 +102,8 @@ interface ServiceReminderSmsInput {
   garagePhone: string;
   nextServiceDate: Date | string;
   reminderType: string;
+  /** Garage's resolved locale — drives the date format and the phone country. */
+  locale?: ResolvedLocale;
 }
 
 interface SkippedResult {
@@ -121,14 +113,15 @@ interface SkippedResult {
 
 // ───── Service Reminder SMS Template ─────
 export const sendServiceReminderSms = async ({
-  customerName, customerPhone, vehiclePlate, vehicleMake, vehicleModel, garageName, garagePhone, nextServiceDate, reminderType
+  customerName, customerPhone, vehiclePlate, vehicleMake, vehicleModel, garageName, garagePhone, nextServiceDate, reminderType,
+  locale = resolveGarageLocale(null)
 }: ServiceReminderSmsInput): Promise<SendSmsResult | SkippedResult> => {
   if (!customerPhone) {
     log.info('Skipping SMS — no customer phone', { customerName, vehiclePlate });
     return { skipped: true, reason: 'no_phone' };
   }
 
-  const dateStr = new Date(nextServiceDate).toLocaleDateString('en-IN', {
+  const dateStr = formatDate(nextServiceDate, locale, {
     day: 'numeric', month: 'short', year: 'numeric'
   });
 
@@ -141,7 +134,7 @@ export const sendServiceReminderSms = async ({
   };
   const serviceLabel = typeLabels[reminderType] || 'service';
 
-  const body = `Hi ${customerName}! 🔧\n\nYour ${vehicleMake} ${vehicleModel} (${vehiclePlate}) is due for a ${serviceLabel} on ${dateStr}.\n\nCall us at ${garagePhone} to book your appointment.\n\n— ${garageName}`;
+  const body = `Hi ${customerName},\n\nYour ${vehicleMake} ${vehicleModel} (${vehiclePlate}) is due for a ${serviceLabel} on ${dateStr}.\n\nCall us at ${garagePhone} to book your appointment.\n\n— ${garageName}`;
 
-  return sendSms({ to: customerPhone, body });
+  return sendSms({ to: customerPhone, body, country: locale.country });
 };

@@ -34,7 +34,7 @@ async function main() {
     .lean();
 
   if (orphans.length === 0) {
-    console.log('No ownerless garages found. ✅');
+    console.log('No ownerless garages found.');
     await mongoose.disconnect();
     return;
   }

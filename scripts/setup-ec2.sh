@@ -12,11 +12,11 @@ echo "   GaragePulse EC2 Setup Script"
 echo "══════════════════════════════════════════"
 
 # 1. System update
-echo "📦 Updating system packages..."
+echo "Updating system packages..."
 apt-get update && apt-get upgrade -y
 
 # 2. Install Docker
-echo "🐳 Installing Docker..."
+echo "Installing Docker..."
 apt-get install -y ca-certificates curl gnupg
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -28,11 +28,11 @@ apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # 3. Add current user to docker group
-echo "👤 Adding user to docker group..."
+echo "Adding user to docker group..."
 usermod -aG docker ubuntu
 
 # 4. Setup project directories
-echo "📁 Creating project directories..."
+echo "Creating project directories..."
 mkdir -p /home/ubuntu/garagepulse/nginx/ssl
 mkdir -p /home/ubuntu/deploy
 chown -R ubuntu:ubuntu /home/ubuntu/garagepulse /home/ubuntu/deploy
@@ -42,14 +42,14 @@ systemctl enable docker
 systemctl start docker
 
 # 6. Setup firewall
-echo "🔥 Configuring firewall..."
+echo "Configuring firewall..."
 ufw allow 22/tcp    # SSH
 ufw allow 80/tcp    # HTTP
 ufw allow 443/tcp   # HTTPS
 ufw --force enable
 
 # 7. Setup swap (useful for t2.micro/t3.micro)
-echo "💾 Setting up swap space..."
+echo "Setting up swap space..."
 if [ ! -f /swapfile ]; then
     fallocate -l 1G /swapfile
     chmod 600 /swapfile
@@ -60,7 +60,7 @@ fi
 
 echo ""
 echo "══════════════════════════════════════════"
-echo "   ✅ Setup Complete!"
+echo "   Setup Complete!"
 echo "══════════════════════════════════════════"
 echo ""
 echo "Next steps:"

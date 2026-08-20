@@ -5,9 +5,27 @@ import Customer from '../models/Customer';
 import Vehicle from '../models/Vehicle';
 import Inventory from '../models/Inventory';
 import ServiceReminder from '../models/ServiceReminder';
+import Garage from '../models/Garage';
 import logger from '../utils/logger';
+import { resolveGarageLocale, LocaleSource } from '../utils/locale';
+import { formatDate } from '../utils/format';
 
 const log = logger.child('DashboardUsecase');
+
+/**
+ * Chart axis labels are baked server-side, so they must follow the garage's
+ * locale rather than the server's.
+ *
+ * Deliberately formatted WITHOUT a timezone: the cursor dates below are built
+ * from the server clock and paired with a `key` derived from the same date.
+ * Shifting the label into another zone would let it name a different day than
+ * its key, so the label follows the locale only — which is all that's wrong
+ * with the hardcoded 'en-IN' today.
+ */
+const resolveChartLocale = async (garageId: Types.ObjectId | string) => {
+  const garage = await Garage.findById(garageId).select('country settings').lean<LocaleSource | null>();
+  return resolveGarageLocale(garage);
+};
 
 interface StatsInput {
   garageId: Types.ObjectId | string;
@@ -21,6 +39,7 @@ export const compileStats = async ({ garageId }: StatsInput) => {
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 
   const startTime = Date.now();
+  const chartLocale = await resolveChartLocale(garageId);
 
   const [
     totalCustomers,
@@ -156,7 +175,7 @@ export const compileStats = async ({ garageId }: StatsInput) => {
     const key = d.toISOString().split('T')[0];
     return {
       date: key,
-      label: d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' }),
+      label: formatDate(d, { locale: chartLocale.locale }, { weekday: 'short', day: 'numeric' }),
       revenue: revenueMap[key] || 0
     };
   });
@@ -211,6 +230,7 @@ export const getChartData = async ({ garageId, startDate, endDate, groupBy }: Ch
   // MongoDB date format string per groupBy mode
   const fmtMap: Record<GroupBy, string> = { day: '%Y-%m-%d', week: '%Y-%U', month: '%Y-%m' };
   const dateFormat = fmtMap[groupBy] || '%Y-%m-%d';
+  const chartLocale = await resolveChartLocale(garageId);
 
   const [revenueRaw, jobStatusRaw] = await Promise.all([
     // Revenue grouped by period
@@ -260,7 +280,7 @@ export const getChartData = async ({ garageId, startDate, endDate, groupBy }: Ch
 
     if (groupBy === 'month') {
       key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
-      label = cursor.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+      label = formatDate(cursor, { locale: chartLocale.locale }, { month: 'short', year: '2-digit' });
       cursor.setMonth(cursor.getMonth() + 1);
     } else if (groupBy === 'week') {
       // ISO week number
@@ -271,7 +291,7 @@ export const getChartData = async ({ garageId, startDate, endDate, groupBy }: Ch
       cursor.setDate(cursor.getDate() + 7);
     } else {
       key = cursor.toISOString().split('T')[0];
-      label = cursor.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+      label = formatDate(cursor, { locale: chartLocale.locale }, { weekday: 'short', day: 'numeric', month: 'short' });
       cursor.setDate(cursor.getDate() + 1);
     }
 

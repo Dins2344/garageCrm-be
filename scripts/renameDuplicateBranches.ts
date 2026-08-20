@@ -35,7 +35,7 @@ async function main() {
   ]);
 
   if (dupeGroups.length === 0) {
-    console.log('No duplicate {owner, name} branches found. ✅');
+    console.log('No duplicate {owner, name} branches found.');
     await mongoose.disconnect();
     return;
   }

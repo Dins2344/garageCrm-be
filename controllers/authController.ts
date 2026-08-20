@@ -1,12 +1,21 @@
 import { Request, Response, NextFunction } from 'express';
 import * as authUsecase from '../usecases/authUsecase';
 import { IUser } from '../models/User';
+import Garage from '../models/Garage';
+import { resolveGarageLocale } from '../utils/locale';
 import logger from '../utils/logger';
 const log = logger.child('AuthController');
 
 // Helper to send formatted token response
-const sendTokenResponse = (user: IUser, statusCode: number, res: Response): void => {
+//
+// The `locale` block rides along on every auth response because it's the only
+// path a NON-OWNER has to the garage's locale: the mobile GarageContext only
+// calls listBranches(), and only for owners, so staff would otherwise have
+// nothing to format currency/dates with. One indexed _id lookup.
+const sendTokenResponse = async (user: IUser, statusCode: number, res: Response): Promise<void> => {
   const token = user.getSignedJwtToken();
+
+  const garage = await Garage.findById(user.garage).select('country settings').lean();
 
   const options = {
     expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
@@ -27,7 +36,8 @@ const sendTokenResponse = (user: IUser, statusCode: number, res: Response): void
         email: user.email,
         phone: user.phone,
         role: user.role,
-        garage: user.garage
+        garage: user.garage,
+        locale: resolveGarageLocale(garage)
       }
     });
 };
@@ -39,7 +49,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     log.info('New garage registration attempt', { email: req.body.email, garageName: req.body.garageName });
     const { user } = await authUsecase.registerNewGarage(req.body);
     log.info('New garage registered successfully', { userId: user._id, garageId: user.garage });
-    sendTokenResponse(user, 201, res);
+    await sendTokenResponse(user, 201, res);
   } catch (error) {
     log.error('Garage registration failed', { email: req.body.email, error: (error as Error).message });
     next(error);
@@ -56,7 +66,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       password: req.body.password
     });
     log.info('Login successful', { userId: user._id, role: user.role });
-    sendTokenResponse(user, 200, res);
+    await sendTokenResponse(user, 200, res);
   } catch (error) {
     log.warn('Login failed', { email: req.body.email, error: (error as Error).message });
     next(error);
@@ -72,7 +82,10 @@ export const getMe = async (req: Request, res: Response, next: NextFunction): Pr
     // but the client-side User type (web and mobile) expects garage as a
     // plain id string, matching /auth/login and /auth/register — flatten it
     // back down here rather than leaking the populated document to clients.
-    const data = { ...req.user!.toObject(), garage: req.user!.garage._id };
+    // The populated garage already carries country/settings, so the locale
+    // resolves here without an extra query — resolve BEFORE flattening.
+    const locale = resolveGarageLocale(req.user!.garage as unknown as Parameters<typeof resolveGarageLocale>[0]);
+    const data = { ...req.user!.toObject(), garage: req.user!.garage._id, locale };
     res.status(200).json({ success: true, data });
   } catch (error) {
     log.error('Failed to get current user', { error: (error as Error).message });

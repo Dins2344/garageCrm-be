@@ -8,6 +8,7 @@ import { sendEstimationEmail } from '../services/emailService';
 import * as pdfService from '../services/pdfService';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
+import { resolveGarageLocale } from '../utils/locale';
 import { JobStatus, Role, TERMINAL_JOB_STATUSES } from '../types/domain';
 import { FREE_PLAN_LIMITS } from '../config/planLimits';
 
@@ -214,7 +215,8 @@ export const updateJobCardProgress = async ({ jobCardId, garageId, userId, updat
           grandTotal: jobCard!.estimation?.grandTotal || 0,
           garageName: garage?.name || 'GaragePulse',
           garagePhone: garage?.phone || '',
-          approvalLink
+          approvalLink,
+          locale: resolveGarageLocale(garage)
         });
         log.info('Estimation email sent', { jobCardId, to: customer?.email });
       } catch (emailErr) {

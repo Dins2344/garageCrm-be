@@ -35,10 +35,14 @@ const userSchema = new Schema<IUser>({
     lowercase: true,
     match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please provide a valid email']
   },
+  // Permissive on purpose. Country-aware validation can't live here — the
+  // schema has no access to the garage's country at validate time — and a
+  // strict rule would reject existing users on unrelated profile updates.
+  // This is a shape check only; semantic validation belongs in the usecase.
   phone: {
     type: String,
     required: [true, 'Phone number is required'],
-    match: [/^[6-9]\d{9}$/, 'Please provide a valid 10-digit Indian phone number']
+    match: [/^\+?[0-9\s()\-]{6,20}$/, 'Please provide a valid phone number']
   },
   password: {
     type: String,

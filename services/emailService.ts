@@ -1,5 +1,7 @@
 import nodemailer, { Transporter, SentMessageInfo } from 'nodemailer';
 import logger from '../utils/logger';
+import { resolveGarageLocale, type ResolvedLocale } from '../utils/locale';
+import { formatMoney, formatDate } from '../utils/format';
 const log = logger.child('EmailService');
 
 // ───── Transport Setup ─────
@@ -131,18 +133,21 @@ interface ServiceReminderEmailInput {
   garagePhone: string;
   nextServiceDate: Date | string;
   reminderType: string;
+  /** Garage's resolved locale. Defaults to India when a caller omits it. */
+  locale?: ResolvedLocale;
 }
 
 // ───── Reminder Email Template ─────
 export const sendServiceReminder = async ({
-  customerName, customerEmail, vehiclePlate, vehicleMake, vehicleModel, garageName, garagePhone, nextServiceDate, reminderType
+  customerName, customerEmail, vehiclePlate, vehicleMake, vehicleModel, garageName, garagePhone, nextServiceDate, reminderType,
+  locale = resolveGarageLocale(null)
 }: ServiceReminderEmailInput): Promise<SendEmailResult | SkippedResult> => {
   if (!customerEmail) {
     log.info('Skipping email — no customer email', { customerName, vehiclePlate });
     return { skipped: true, reason: 'no_email' };
   }
 
-  const dateStr = new Date(nextServiceDate).toLocaleDateString('en-IN', {
+  const dateStr = formatDate(nextServiceDate, locale, {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   });
 
@@ -155,7 +160,7 @@ export const sendServiceReminder = async ({
   };
   const serviceLabel = typeLabels[reminderType] || 'Service';
 
-  const subject = `🔧 ${serviceLabel} Reminder — ${vehiclePlate} | ${garageName}`;
+  const subject = `${serviceLabel} Reminder — ${vehiclePlate} | ${garageName}`;
 
   const html = `
 <!DOCTYPE html>
@@ -218,7 +223,7 @@ export const sendServiceReminder = async ({
           <tr>
             <td style="background:linear-gradient(135deg,#3b5ff8,#2540ed);border-radius:8px;">
               <a href="tel:${garagePhone}" style="display:inline-block;padding:14px 36px;color:#ffffff;font-weight:600;font-size:15px;text-decoration:none;">
-                📞 Call to Book Now
+                Call to Book Now
               </a>
             </td>
           </tr>
@@ -255,6 +260,8 @@ interface EstimationEmailInput {
   garageName: string;
   garagePhone: string;
   approvalLink: string;
+  /** Garage's resolved locale. Defaults to India when a caller omits it. */
+  locale?: ResolvedLocale;
 }
 
 // ───── Estimation Approval Email ─────
@@ -269,7 +276,8 @@ export const sendEstimationEmail = async ({
   grandTotal,
   garageName,
   garagePhone,
-  approvalLink
+  approvalLink,
+  locale = resolveGarageLocale(null)
 }: EstimationEmailInput): Promise<SendEmailResult | SkippedResult> => {
   if (!customerEmail) {
     log.info('Skipping estimation email — no customer email', { customerName, vehiclePlate });
@@ -335,7 +343,7 @@ export const sendEstimationEmail = async ({
         <table width="100%" cellpadding="0" cellspacing="0" style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;margin-bottom:32px;">
           <tr><td style="padding:18px 24px;">
             <span style="font-size:13px;color:#1d4ed8;">Estimated Total</span>
-            <span style="float:right;font-size:22px;font-weight:800;color:#1d4ed8;">&#8377;${grandTotal.toLocaleString('en-IN')}</span>
+            <span style="float:right;font-size:22px;font-weight:800;color:#1d4ed8;">${formatMoney(grandTotal, locale)}</span>
           </td></tr>
         </table>
 
@@ -363,7 +371,7 @@ export const sendEstimationEmail = async ({
 </body>
 </html>`;
 
-  const text = `Hi ${customerName},\n\nWe have prepared an estimation for your vehicle ${vehiclePlate} (${vehicleMake} ${vehicleModel}).\n\nJob Card: ${jobCardNumber}\nEstimated Total: Rs.${grandTotal}\n\nPlease review and approve here:\n${approvalLink}\n\nQuestions? Call ${garageName} at ${garagePhone}.`;
+  const text = `Hi ${customerName},\n\nWe have prepared an estimation for your vehicle ${vehiclePlate} (${vehicleMake} ${vehicleModel}).\n\nJob Card: ${jobCardNumber}\nEstimated Total: ${formatMoney(grandTotal, locale)}\n\nPlease review and approve here:\n${approvalLink}\n\nQuestions? Call ${garageName} at ${garagePhone}.`;
 
   return sendEmail({ to: customerEmail, subject, html, text });
 };

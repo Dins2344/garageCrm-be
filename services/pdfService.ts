@@ -1,5 +1,7 @@
 import PDFDocument from 'pdfkit';
 import logger from '../utils/logger';
+import { resolveGarageLocale } from '../utils/locale';
+import { formatMoney, formatNumber, formatDate } from '../utils/format';
 const log = logger.child('PDFService');
 
 interface PDFPart {
@@ -48,6 +50,15 @@ interface PDFGarage {
   address?: PDFGarageAddress;
   phone?: string;
   gstNumber?: string;
+  // Callers already pass the whole garage document, so these are present at
+  // runtime — they just weren't in the type. Needed to resolve the locale.
+  country?: string;
+  settings?: {
+    currency?: string;
+    locale?: string;
+    taxLabel?: string;
+    timezone?: string;
+  };
 }
 
 interface PDFData {
@@ -113,6 +124,13 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
 
       const pageWidth = doc.page.width - 100;
 
+      // All money/dates/labels below follow the GARAGE's locale, not the
+      // server's. Resolves to India for garages with no country set.
+      const locale = resolveGarageLocale(garage);
+      const money = (amount?: number) => formatMoney(amount, locale, { display: 'code' });
+      const longDate = (d?: Date | string | null) =>
+        formatDate(d, locale, { day: 'numeric', month: 'long', year: 'numeric' });
+
       // ===== HEADER =====
       doc.fontSize(22).font('Helvetica-Bold').fillColor('#1e293b').text(garage?.name || 'GaragePulse', 50, 50);
 
@@ -122,7 +140,7 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
       const cityState = [garage?.address?.city, garage?.address?.state, garage?.address?.pincode].filter(Boolean).join(', ');
       if (cityState) { doc.text(cityState, 50, headerY); headerY += 13; }
       if (garage?.phone) { doc.text(`Phone: ${garage.phone}`, 50, headerY); headerY += 13; }
-      if (garage?.gstNumber) { doc.text(`GSTIN: ${garage.gstNumber}`, 50, headerY); headerY += 13; }
+      if (garage?.gstNumber) { doc.text(`${locale.taxIdLabel}: ${garage.gstNumber}`, 50, headerY); headerY += 13; }
 
       // Title on the right
       doc.fontSize(28).font('Helvetica-Bold').fillColor(title === 'INVOICE' ? '#3b5ff8' : '#64748b')
@@ -130,10 +148,10 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
 
       doc.fontSize(10).font('Helvetica').fillColor('#334155')
         .text(`${title} #: ${data.invoiceNumber || 'N/A'}`, 350, 85, { align: 'right', width: pageWidth - 300 })
-        .text(`Date: ${new Date(data.createdAt as string).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}`, 350, 100, { align: 'right', width: pageWidth - 300 });
+        .text(`Date: ${longDate(data.createdAt)}`, 350, 100, { align: 'right', width: pageWidth - 300 });
 
       if (data.paidAt) {
-        doc.fillColor('#059669').text(`Paid: ${new Date(data.paidAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}`, 350, 115, { align: 'right', width: pageWidth - 300 });
+        doc.fillColor('#059669').text(`Paid: ${longDate(data.paidAt)}`, 350, 115, { align: 'right', width: pageWidth - 300 });
       }
 
       const lineY = Math.max(headerY, 135) + 10;
@@ -160,7 +178,7 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
       vehicleY += 13;
       if (data.vehicle?.color) { doc.text(`Color: ${data.vehicle.color}`, 350, vehicleY); vehicleY += 13; }
       if (data.odometerAtIntake !== undefined && data.odometerAtIntake !== null) {
-        doc.text(`Kilometers Run: ${Number(data.odometerAtIntake).toLocaleString('en-IN')} km`, 350, vehicleY);
+        doc.text(`Kilometers Run: ${formatNumber(data.odometerAtIntake, locale)} km`, 350, vehicleY);
         vehicleY += 13;
       }
 
@@ -186,8 +204,8 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
           doc.text(`${i + 1}`, 58, tableY + 5, { width: 25 });
           doc.text(p.partName || 'Part', 85, tableY + 5, { width: 200 });
           doc.text(`${p.quantity}`, 310, tableY + 5, { width: 50, align: 'center' });
-          doc.text(formatCurrency(p.unitPrice), 370, tableY + 5, { width: 80, align: 'right' });
-          doc.font('Helvetica-Bold').text(formatCurrency(p.total), 460, tableY + 5, { width: 80, align: 'right' });
+          doc.text(money(p.unitPrice), 370, tableY + 5, { width: 80, align: 'right' });
+          doc.font('Helvetica-Bold').text(money(p.total), 460, tableY + 5, { width: 80, align: 'right' });
           tableY += 22;
           doc.moveTo(50, tableY).lineTo(50 + pageWidth, tableY).strokeColor('#f1f5f9').lineWidth(0.5).stroke();
         });
@@ -213,8 +231,8 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
           doc.text(`${i + 1}`, 58, tableY + 5, { width: 25 });
           doc.text(l.description || 'Labor', 85, tableY + 5, { width: 200 });
           doc.text(`${l.hours}`, 310, tableY + 5, { width: 50, align: 'center' });
-          doc.text(formatCurrency(l.ratePerHour), 370, tableY + 5, { width: 80, align: 'right' });
-          doc.font('Helvetica-Bold').text(formatCurrency(l.total), 460, tableY + 5, { width: 80, align: 'right' });
+          doc.text(money(l.ratePerHour), 370, tableY + 5, { width: 80, align: 'right' });
+          doc.font('Helvetica-Bold').text(money(l.total), 460, tableY + 5, { width: 80, align: 'right' });
           tableY += 22;
           doc.moveTo(50, tableY).lineTo(50 + pageWidth, tableY).strokeColor('#f1f5f9').lineWidth(0.5).stroke();
         });
@@ -235,30 +253,32 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
       doc.fontSize(9).font('Helvetica').fillColor('#475569');
 
       doc.text('Total Spare Parts', totalsX, tableY, { width: totalsWidth - 90 });
-      doc.text(formatCurrency(partsTotal), totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
+      doc.text(money(partsTotal), totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
       tableY += 15;
 
       doc.text('Total Labor Charges', totalsX, tableY, { width: totalsWidth - 90 });
-      doc.text(formatCurrency(laborTotal), totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
+      doc.text(money(laborTotal), totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
       tableY += 15;
 
       if (data.discount && data.discount > 0) {
         doc.fillColor('#059669');
         doc.text('Special Discount', totalsX, tableY, { width: totalsWidth - 90 });
-        doc.text(`-${formatCurrency(data.discount)}`, totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
+        doc.text(`-${money(data.discount)}`, totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
         tableY += 15;
       }
 
       doc.fillColor('#475569');
-      doc.text(`Tax (${data.taxRate ?? 18}%)`, totalsX, tableY, { width: totalsWidth - 90 });
-      doc.text(formatCurrency(data.taxAmount), totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
+      // `?? 0`, not `?? 18`: in a 0%-tax jurisdiction the old fallback printed
+      // a fabricated "18%" tax line on a customer-facing invoice.
+      doc.text(`${locale.taxLabel} (${data.taxRate ?? 0}%)`, totalsX, tableY, { width: totalsWidth - 90 });
+      doc.text(money(data.taxAmount), totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
       tableY += 20;
 
       doc.moveTo(totalsX, tableY).lineTo(totalsX + totalsWidth, tableY).strokeColor('#1e293b').lineWidth(1).stroke();
       tableY += 8;
       doc.fontSize(13).font('Helvetica-Bold').fillColor('#1e293b');
       doc.text('Total Amount', totalsX, tableY, { width: totalsWidth - 90 });
-      doc.text(formatCurrency(data.grandTotal), totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
+      doc.text(money(data.grandTotal), totalsX + totalsWidth - 90, tableY, { width: 90, align: 'right' });
       tableY += 25;
 
       // ===== FOOTER =====
@@ -266,7 +286,7 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
       doc.moveTo(50, footerY).lineTo(50 + pageWidth, footerY).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
       doc.fontSize(8).font('Helvetica').fillColor('#94a3b8')
         .text(title === 'INVOICE' ? 'Thank you for your business!' : 'This is a computer generated estimation and not an invoice.', 50, footerY + 10, { align: 'center', width: pageWidth })
-        .text(`Generated by GaragePulse CRM | ${new Date().toLocaleDateString('en-IN')}`, 50, footerY + 20, { align: 'center', width: pageWidth });
+        .text(`Generated by GaragePulse CRM | ${formatDate(new Date(), locale, { day: '2-digit', month: '2-digit', year: 'numeric' })}`, 50, footerY + 20, { align: 'center', width: pageWidth });
 
       doc.end();
       log.info(`${title} PDF generated`);
@@ -277,7 +297,3 @@ const generatePDF = (data: PDFData, garage: PDFGarage | null, title: 'INVOICE' |
   });
 };
 
-function formatCurrency(amount?: number): string {
-  if (!amount && amount !== 0) return '0.00';
-  return `Rs. ${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}

@@ -4,16 +4,29 @@ import ServiceReminder from '../models/ServiceReminder';
 import { sendServiceReminder } from '../services/emailService';
 import { sendServiceReminderSms, isSmsConfigured } from '../services/smsService';
 import logger from '../utils/logger';
+import { resolveGarageLocale, LocaleSource } from '../utils/locale';
+import { hourInTimezone } from '../utils/format';
 const log = logger.child('CronScheduler');
+
+/** Local wall-clock hour at which a garage's reminders go out. */
+const REMINDER_SEND_HOUR = 9;
+
+/**
+ * How long after an attempt the same reminder may be attempted again.
+ * The hourly job visits each garage's 09:00 exactly once a day, so this only
+ * guards against a redeploy landing inside that same hour.
+ */
+const REATTEMPT_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
 interface DueReminder {
   _id: Types.ObjectId;
   customer?: { name?: string; email?: string; phone?: string } | null;
   vehicle?: { licensePlate?: string; make?: string; model?: string } | null;
-  garage?: { name?: string; phone?: string } | null;
+  garage?: (LocaleSource & { name?: string; phone?: string }) | null;
   nextServiceDate: Date;
   type: string;
   notes?: string;
+  lastAttemptAt?: Date | null;
 }
 
 interface ProcessResult {
@@ -22,25 +35,44 @@ interface ProcessResult {
   smsSent: number;
   skipped: number;
   failed: number;
+  /** Due, but it isn't 09:00 yet in that garage's own timezone. */
+  heldForLocalTime: number;
 }
 
 interface ProcessError {
   error: string;
 }
 
+interface ProcessOptions {
+  /**
+   * When true (the scheduled path), a reminder is only sent during the hour
+   * that is 09:00 in its own garage's timezone. The manual trigger passes
+   * false — an owner clicking "send now" means now.
+   */
+  respectLocalHour?: boolean;
+  /** Injectable clock, for tests. */
+  now?: Date;
+}
+
 // ───────────────────────────────────────────────
 // Job 1: Process Service Reminders
-// Runs every day at 9:00 AM server time
-// Finds all pending reminders due within the next 7 days
-// Sends email + SMS notifications and marks them as 'sent'
+// Runs HOURLY in UTC; each reminder is sent only during the hour that reads
+// 09:00 in its own garage's timezone. Finds all pending reminders due within
+// the next 7 days, sends email + SMS, and marks them as 'sent'.
+//
+// Deliberately NOT one cron job per garage timezone: that scales with tenants
+// and leaves orphaned schedules whenever a garage changes country. One hourly
+// sweep plus a per-garage predicate is O(1) jobs and always reflects current
+// data.
 // ───────────────────────────────────────────────
-export const processServiceReminders = async (): Promise<ProcessResult | ProcessError> => {
+export const processServiceReminders = async (
+  { respectLocalHour = false, now = new Date() }: ProcessOptions = {}
+): Promise<ProcessResult | ProcessError> => {
   const jobStart = Date.now();
-  log.info('Cron: Starting service reminder processing');
+  log.info('Cron: Starting service reminder processing', { respectLocalHour });
 
   try {
-    const now = new Date();
-    const sevenDaysFromNow = new Date();
+    const sevenDaysFromNow = new Date(now);
     sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
 
     // Find all pending reminders that are due within 7 days (or already overdue)
@@ -55,7 +87,7 @@ export const processServiceReminders = async (): Promise<ProcessResult | Process
 
     if (dueReminders.length === 0) {
       log.info('Cron: No pending reminders found');
-      return { processed: 0, emailSent: 0, smsSent: 0, skipped: 0, failed: 0 };
+      return { processed: 0, emailSent: 0, smsSent: 0, skipped: 0, failed: 0, heldForLocalTime: 0 };
     }
 
     log.info(`Cron: Found ${dueReminders.length} reminders to process`);
@@ -64,9 +96,30 @@ export const processServiceReminders = async (): Promise<ProcessResult | Process
     let smsSent = 0;
     let skipped = 0;
     let failed = 0;
+    let heldForLocalTime = 0;
 
     for (const reminder of dueReminders) {
       try {
+        const locale = resolveGarageLocale(reminder.garage);
+
+        // ── Local-time gate ──
+        // Held reminders are left completely untouched: no status change, no
+        // note appended. That is what makes an hourly sweep idempotent — the
+        // other 23 hours are pure reads.
+        if (respectLocalHour && hourInTimezone(now, locale.timezone) !== REMINDER_SEND_HOUR) {
+          heldForLocalTime++;
+          continue;
+        }
+
+        // A redeploy can restart the process inside the same local hour.
+        // Reminders that succeeded are already 'sent'; this covers the ones
+        // that stay 'pending' because the customer has no email and no phone.
+        const lastAttempt = reminder.lastAttemptAt ? new Date(reminder.lastAttemptAt).getTime() : 0;
+        if (respectLocalHour && now.getTime() - lastAttempt < REATTEMPT_COOLDOWN_MS) {
+          heldForLocalTime++;
+          continue;
+        }
+
         const reminderData = {
           customerName: reminder.customer?.name || 'Customer',
           customerEmail: reminder.customer?.email,
@@ -77,7 +130,8 @@ export const processServiceReminders = async (): Promise<ProcessResult | Process
           garageName: reminder.garage?.name || 'GaragePulse',
           garagePhone: reminder.garage?.phone || '',
           nextServiceDate: reminder.nextServiceDate,
-          reminderType: reminder.type
+          reminderType: reminder.type,
+          locale
         };
 
         let notesAppend = '';
@@ -123,6 +177,7 @@ export const processServiceReminders = async (): Promise<ProcessResult | Process
           await ServiceReminder.findByIdAndUpdate(reminder._id, {
             status: 'sent',
             reminderSentAt: now,
+            lastAttemptAt: now,
             notes: (reminder.notes || '') + notesAppend
           });
 
@@ -137,6 +192,7 @@ export const processServiceReminders = async (): Promise<ProcessResult | Process
           // Neither email nor SMS succeeded — keep as pending for retry
           skipped++;
           await ServiceReminder.findByIdAndUpdate(reminder._id, {
+            lastAttemptAt: now,
             notes: (reminder.notes || '') + notesAppend
           });
         }
@@ -148,6 +204,7 @@ export const processServiceReminders = async (): Promise<ProcessResult | Process
         });
 
         await ServiceReminder.findByIdAndUpdate(reminder._id, {
+          lastAttemptAt: now,
           notes: (reminder.notes || '') + `\n[Cron Error] ${now.toISOString()}: ${(err as Error).message}`
         });
       }
@@ -160,11 +217,12 @@ export const processServiceReminders = async (): Promise<ProcessResult | Process
       smsSent,
       skipped,
       failed,
+      heldForLocalTime,
       smsConfigured: isSmsConfigured(),
       durationMs: duration
     });
 
-    return { processed: dueReminders.length, emailSent, smsSent, skipped, failed };
+    return { processed: dueReminders.length, emailSent, smsSent, skipped, failed, heldForLocalTime };
   } catch (err) {
     log.error('Cron: Fatal error in reminder processing', { error: (err as Error).message, stack: (err as Error).stack });
     return { error: (err as Error).message };
@@ -200,25 +258,43 @@ export const cleanupOldReminders = async (): Promise<{ deleted: number } | Proce
 // Scheduler Bootstrap
 // ───────────────────────────────────────────────
 export const startScheduler = (): void => {
-  // Daily at 9:00 AM — Process service reminders
-  cron.schedule('0 9 * * *', () => {
-    processServiceReminders();
+  // Every half hour, in UTC — each garage is served during the hour that reads
+  // 09:00 in its own timezone.
+  //
+  // :00 and :30, not just :00, because several zones are offset by a half hour
+  // (India +5:30, Adelaide +9:30, Newfoundland -3:30, Kathmandu +5:45). On a
+  // strictly hourly schedule the first UTC tick that lands inside India's 09:00
+  // hour is 04:00 UTC — which is already 09:30 IST, quietly moving every Indian
+  // garage's reminders half an hour later than the 'Asia/Kolkata' 09:00 cron
+  // this replaced. 03:30 UTC is exactly 09:00 IST.
+  //
+  // The extra tick cannot double-send: a reminder that went out is already
+  // 'sent' and no longer matches the query, and one that couldn't be sent is
+  // held by the re-attempt cooldown.
+  cron.schedule('0,30 * * * *', () => {
+    processServiceReminders({ respectLocalHour: true });
   }, {
-    timezone: 'Asia/Kolkata'
+    timezone: 'UTC'
   });
-  log.info('Cron job registered: Service reminders (daily 9:00 AM IST)');
+  log.info('Cron job registered: Service reminders (every 30m UTC, sent at 09:00 garage-local)');
 
-  // Every Sunday at 2:00 AM — Cleanup old reminders
+  // Every Sunday at 2:00 AM UTC — Cleanup old reminders.
+  // Housekeeping only, never customer-facing, so one global time is fine.
   cron.schedule('0 2 * * 0', () => {
     cleanupOldReminders();
   }, {
-    timezone: 'Asia/Kolkata'
+    timezone: 'UTC'
   });
-  log.info('Cron job registered: Reminder cleanup (Sunday 2:00 AM IST)');
+  log.info('Cron job registered: Reminder cleanup (Sunday 2:00 AM UTC)');
 
-  // Immediate first run on startup (after 10s delay so DB is ready)
+  // One run on startup (after 10s so the DB is ready) so a deploy landing
+  // inside a garage's 09:00 hour still serves it. It respects the local-hour
+  // gate and the cooldown, so it is a no-op the rest of the time and a
+  // redeploy can never double-send. A garage whose 09:00 was missed entirely
+  // is picked up the next day — reminders fire up to 7 days before the due
+  // date, so a one-day slip is harmless.
   setTimeout(() => {
     log.info('Running initial reminder check on startup...');
-    processServiceReminders();
+    processServiceReminders({ respectLocalHour: true });
   }, 10000);
 };

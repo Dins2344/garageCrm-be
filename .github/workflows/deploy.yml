@@ -67,37 +67,37 @@ jobs:
           script: |
             set -e
 
-            echo "🔐 Logging into Docker Hub..."
+            echo "Logging into Docker Hub..."
             echo "$DH_TOKEN" | docker login -u "$DH_USER" --password-stdin
 
-            echo "📥 Pulling latest image..."
+            echo "Pulling latest image..."
             docker pull "${DOCKER_IMG}:latest"
 
-            echo "📂 Moving to project directory..."
+            echo "Moving to project directory..."
             cd ~/garagepulse
 
-            echo "🔄 Stopping old containers..."
+            echo "Stopping old containers..."
             docker compose down --remove-orphans || true
 
-            echo "🚀 Starting new containers..."
+            echo "Starting new containers..."
             DOCKER_IMAGE="${DOCKER_IMG}" docker compose up -d
 
             echo "⏳ Waiting for health check..."
             sleep 10
 
-            echo "🩺 Checking health..."
-            curl -sf http://localhost:5000/api/health || (echo "❌ Health check failed!" && docker compose logs backend && exit 1)
+            echo "Checking health..."
+            curl -sf http://localhost:5000/api/health || (echo "Health check failed!" && docker compose logs backend && exit 1)
 
-            echo "🧹 Cleaning up old images..."
+            echo "Cleaning up old images..."
             docker image prune -f
 
-            echo "✅ Deployment complete!"
+            echo "Deployment complete!"
 
       - name: Deployment status
         if: always()
         run: |
           if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Deployment succeeded for commit ${{ github.sha }}"
+            echo "Deployment succeeded for commit ${{ github.sha }}"
           else
-            echo "❌ Deployment failed for commit ${{ github.sha }}"
+            echo "Deployment failed for commit ${{ github.sha }}"
           fi

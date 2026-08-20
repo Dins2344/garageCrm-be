@@ -10,6 +10,8 @@ import ServiceReminder from '../models/ServiceReminder';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { FREE_PLAN_LIMITS } from '../config/planLimits';
+import { isSupportedCountry } from '../config/countries';
+import { isValidTimezone } from '../utils/locale';
 
 const log = logger.child('GarageUsecase');
 
@@ -28,7 +30,13 @@ export const getGarageById = async ({ garageId }: GetByIdInput) => {
   return garage;
 };
 
-const ALLOWED_FIELDS = ['name', 'phone', 'email', 'gstNumber', 'address', 'settings'] as const;
+const ALLOWED_FIELDS = ['name', 'phone', 'email', 'gstNumber', 'address', 'settings', 'country'] as const;
+
+// Sub-documents that must be merged key-by-key. `$set: { settings: {...} }`
+// REPLACES the whole sub-document, so a caller sending only `{ taxRate }`
+// silently wipes currency/laborRatePerHour/serviceReminderDays. Flattening to
+// dotted paths (`settings.taxRate`) makes the update a merge instead.
+const NESTED_FIELDS: readonly string[] = ['address', 'settings'];
 
 interface UpdateInput {
   garageId: Types.ObjectId | string;
@@ -36,19 +44,72 @@ interface UpdateInput {
 }
 
 /**
+ * Build a `$set` payload from the whitelisted fields, flattening nested
+ * objects to dotted paths so partial updates merge rather than replace.
+ */
+const buildSetPayload = (updateData: Partial<IGarage>): Record<string, unknown> => {
+  const $set: Record<string, unknown> = {};
+
+  ALLOWED_FIELDS.forEach(field => {
+    const value = updateData[field];
+    if (value === undefined) return;
+
+    const isMergeableObject =
+      NESTED_FIELDS.includes(field) &&
+      value !== null &&
+      typeof value === 'object' &&
+      !Array.isArray(value);
+
+    if (!isMergeableObject) {
+      $set[field] = value;
+      return;
+    }
+
+    Object.entries(value as unknown as Record<string, unknown>).forEach(([key, nestedValue]) => {
+      if (nestedValue === undefined) return;
+      // Never let caller-supplied keys build an operator or traverse deeper
+      // than one level (mongoSanitize also strips `$`, but this is cheap).
+      if (key.startsWith('$') || key.includes('.')) return;
+      $set[`${field}.${key}`] = nestedValue;
+    });
+  });
+
+  return $set;
+};
+
+/**
  * Update garage info — only allows safe, pre-defined fields
  */
 export const updateGarageInfo = async ({ garageId, updateData }: UpdateInput) => {
-  const sanitized: Partial<IGarage> = {};
-  ALLOWED_FIELDS.forEach(field => {
-    if (updateData[field] !== undefined) {
-      (sanitized as Record<string, unknown>)[field] = updateData[field];
+  // Validate the country here rather than leaning on the schema enum: with
+  // `runValidators` a bad code surfaces as a Mongoose ValidationError, and a
+  // typo'd country deserves a clear 400.
+  if (updateData.country !== undefined) {
+    const requested = String(updateData.country).toUpperCase();
+    if (!isSupportedCountry(requested)) {
+      throw new HttpError(`Unsupported country: ${updateData.country}`, 400);
     }
-  });
+    updateData = { ...updateData, country: requested };
+  }
+
+  const requestedTimezone = updateData.settings?.timezone;
+  // '' is meaningful — it clears the override so the country table applies.
+  if (requestedTimezone && !isValidTimezone(requestedTimezone)) {
+    throw new HttpError(`Unrecognised timezone: ${requestedTimezone}`, 400);
+  }
+
+  const $set = buildSetPayload(updateData);
+
+  // Changing country deliberately does NOT rewrite settings.taxRate. The rate
+  // is seeded from the country once at creation and owned by the garage after
+  // that; silently overwriting an owner's configured rate because they fixed
+  // their country would be a worse surprise than showing them a stale one.
+  // The Settings form keeps the rate field visible alongside the picker so the
+  // change is theirs to make.
 
   const garage = await Garage.findByIdAndUpdate(
     garageId,
-    { $set: sanitized },
+    { $set },
     { new: true, runValidators: true }
   );
 
@@ -56,7 +117,7 @@ export const updateGarageInfo = async ({ garageId, updateData }: UpdateInput) =>
     throw new HttpError('Garage not found', 404);
   }
 
-  log.info('Garage info updated', { garageId, fields: Object.keys(sanitized) });
+  log.info('Garage info updated', { garageId, fields: Object.keys($set) });
   return garage;
 };
 
@@ -89,8 +150,27 @@ export const createAdditionalGarage = async ({ ownerId, garageData }: CreateAddi
     );
   }
 
-  const garage = await Garage.create({ ...garageData, owner: ownerId });
-  log.info('Additional garage created', { garageId: garage._id, ownerId });
+  // A branch inherits the owner's existing country and rates rather than
+  // falling back to the schema's India defaults — a GB owner's second branch
+  // must not silently come out as an Indian garage. Uses the oldest garage
+  // (their original one) as the template.
+  const homeGarage = await Garage.findOne({ owner: ownerId }).sort({ createdAt: 1 });
+  const inherited = homeGarage
+    ? {
+        country: homeGarage.country,
+        settings: {
+          taxRate: homeGarage.settings?.taxRate,
+          laborRatePerHour: homeGarage.settings?.laborRatePerHour,
+          currency: homeGarage.settings?.currency,
+          locale: homeGarage.settings?.locale,
+          taxLabel: homeGarage.settings?.taxLabel,
+          timezone: homeGarage.settings?.timezone
+        }
+      }
+    : {};
+
+  const garage = await Garage.create({ ...inherited, ...garageData, owner: ownerId });
+  log.info('Additional garage created', { garageId: garage._id, ownerId, country: garage.country });
   return garage;
 };
 
