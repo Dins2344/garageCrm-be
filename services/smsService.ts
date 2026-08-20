@@ -134,7 +134,7 @@ export const sendServiceReminderSms = async ({
   };
   const serviceLabel = typeLabels[reminderType] || 'service';
 
-  const body = `Hi ${customerName}! 🔧\n\nYour ${vehicleMake} ${vehicleModel} (${vehiclePlate}) is due for a ${serviceLabel} on ${dateStr}.\n\nCall us at ${garagePhone} to book your appointment.\n\n— ${garageName}`;
+  const body = `Hi ${customerName},\n\nYour ${vehicleMake} ${vehicleModel} (${vehiclePlate}) is due for a ${serviceLabel} on ${dateStr}.\n\nCall us at ${garagePhone} to book your appointment.\n\n— ${garageName}`;
 
   return sendSms({ to: customerPhone, body, country: locale.country });
 };

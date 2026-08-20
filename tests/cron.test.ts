@@ -161,6 +161,57 @@ describe('reminder cron — per-garage local 09:00 gate', () => {
   });
 });
 
+describe('reminder cron — the gate lines up with the real schedule', () => {
+  // The tests above feed `now` directly, which can assert a time the scheduler
+  // never actually fires at. These walk the ticks the cron really produces
+  // ('0,30 * * * *' in UTC) and check the send lands on the intended local
+  // time — the check that catches a half-hour drift for offset zones.
+  const ticksFor = (dayUtc: string) => {
+    const ticks: Date[] = [];
+    for (let h = 0; h < 24; h++) {
+      for (const m of [0, 30]) {
+        ticks.push(new Date(`${dayUtc}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`));
+      }
+    }
+    return ticks;
+  };
+
+  /** The first scheduled tick at which this garage would be served. */
+  async function firstSendingTick(day: string) {
+    for (const tick of ticksFor(day)) {
+      const result = await processServiceReminders({ respectLocalHour: true, now: tick });
+      if ((result as { emailSent: number }).emailSent > 0) return tick.toISOString();
+    }
+    return null;
+  }
+
+  it('sends to an India garage at exactly 09:00 IST, not 09:30', async () => {
+    await seedDueReminder('IN');
+    // 03:30Z is 09:00 IST. An hourly-only schedule would first match at 04:00Z
+    // — 09:30 local — silently shifting every Indian garage's reminders.
+    expect(await firstSendingTick('2026-08-14')).toBe('2026-08-14T03:30:00.000Z');
+  });
+
+  it('sends to a UK garage at exactly 09:00 local across DST', async () => {
+    await seedDueReminder('GB');
+    expect(await firstSendingTick('2026-01-14')).toBe('2026-01-14T09:00:00.000Z');  // GMT
+
+    await ServiceReminder.updateMany({}, { status: 'pending', lastAttemptAt: null });
+    sendEmailMock.mockClear();
+    expect(await firstSendingTick('2026-07-14')).toBe('2026-07-14T08:00:00.000Z');  // BST
+  });
+
+  it('sends exactly once per day, even though the job runs 48 times', async () => {
+    await seedDueReminder('IN');
+    let sends = 0;
+    for (const tick of ticksFor('2026-08-14')) {
+      const r = await processServiceReminders({ respectLocalHour: true, now: tick });
+      sends += (r as { emailSent: number }).emailSent;
+    }
+    expect(sends).toBe(1);
+  });
+});
+
 describe('reminder cron — idempotence on re-entry', () => {
   it('does not re-send when the process restarts inside the same local hour', async () => {
     await seedDueReminder('IN');

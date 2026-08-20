@@ -258,15 +258,25 @@ export const cleanupOldReminders = async (): Promise<{ deleted: number } | Proce
 // Scheduler Bootstrap
 // ───────────────────────────────────────────────
 export const startScheduler = (): void => {
-  // Hourly on the hour, in UTC — each garage is served during the hour that
-  // reads 09:00 in its own timezone. An IN garage still gets exactly one send
-  // per day at 09:00 IST, same as the old 'Asia/Kolkata' schedule.
-  cron.schedule('0 * * * *', () => {
+  // Every half hour, in UTC — each garage is served during the hour that reads
+  // 09:00 in its own timezone.
+  //
+  // :00 and :30, not just :00, because several zones are offset by a half hour
+  // (India +5:30, Adelaide +9:30, Newfoundland -3:30, Kathmandu +5:45). On a
+  // strictly hourly schedule the first UTC tick that lands inside India's 09:00
+  // hour is 04:00 UTC — which is already 09:30 IST, quietly moving every Indian
+  // garage's reminders half an hour later than the 'Asia/Kolkata' 09:00 cron
+  // this replaced. 03:30 UTC is exactly 09:00 IST.
+  //
+  // The extra tick cannot double-send: a reminder that went out is already
+  // 'sent' and no longer matches the query, and one that couldn't be sent is
+  // held by the re-attempt cooldown.
+  cron.schedule('0,30 * * * *', () => {
     processServiceReminders({ respectLocalHour: true });
   }, {
     timezone: 'UTC'
   });
-  log.info('Cron job registered: Service reminders (hourly UTC, sent at 09:00 garage-local)');
+  log.info('Cron job registered: Service reminders (every 30m UTC, sent at 09:00 garage-local)');
 
   // Every Sunday at 2:00 AM UTC — Cleanup old reminders.
   // Housekeeping only, never customer-facing, so one global time is fine.

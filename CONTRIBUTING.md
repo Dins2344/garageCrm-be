@@ -5,7 +5,7 @@
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 backend/
@@ -46,7 +46,7 @@ backend/
 
 ---
 
-## 🧱 Architecture Rules
+## Architecture Rules
 
 ### Controller → Usecase → Model (Strict Layering)
 
@@ -70,9 +70,9 @@ backend/
    - **Never** contain business logic
 
 ```
-❌  controller → model       (skip usecase layer)
-❌  usecase → req/res         (HTTP leak into business logic)
-✅  controller → usecase → model
+WRONG   controller → model          (skips the usecase layer)
+WRONG   usecase → req/res           (HTTP leaks into business logic)
+RIGHT   controller → usecase → model
 ```
 
 ### Example — Adding a New Feature (e.g., "Suppliers")
@@ -100,7 +100,7 @@ tests/supplier.test.ts
 
 ---
 
-## 📛 Naming Conventions
+## Naming Conventions
 
 ### Files
 
@@ -133,10 +133,10 @@ tests/supplier.test.ts
 
 ---
 
-## 🔀 Route Definition Rules
+## Route Definition Rules
 
 ```typescript
-// ✅ Correct pattern
+// Correct pattern
 import express from 'express';
 const router = express.Router();
 import { getItems, getItem, createItem, updateItem, deleteItem } from '../controllers/itemController';
@@ -169,7 +169,7 @@ Note: `req.params.<name>` types as `string | string[]` under Express 5's types (
 
 ---
 
-## 📤 API Response Format
+## API Response Format
 
 **All API responses MUST follow this envelope:**
 
@@ -212,17 +212,17 @@ res.status(4xx).json({
 
 ---
 
-## 🚨 Error Handling
+## Error Handling
 
 ### In Usecases — Throw an `HttpError`
 
 ```typescript
 import { HttpError } from '../utils/httpError';
 
-// ✅ Correct
+// Correct
 throw new HttpError('Customer not found', 404);
 
-// ❌ Wrong — don't return res from usecase
+// Wrong — don't return res from usecase
 return res.status(404).json({ ... });
 ```
 
@@ -253,7 +253,7 @@ export const getItem = async (req: Request, res: Response, next: NextFunction): 
 
 ---
 
-## 📊 Logging Standards
+## Logging Standards
 
 We use **Winston** with a structured child logger pattern.
 
@@ -261,7 +261,7 @@ We use **Winston** with a structured child logger pattern.
 
 ```typescript
 import logger from '../utils/logger';
-const log = logger.child('CustomerController');  // ← Service name matches the file
+const log = logger.child('CustomerController');  // Service name matches the file
 ```
 
 ### When to Log
@@ -276,10 +276,10 @@ const log = logger.child('CustomerController');  // ← Service name matches the
 ### Always Include Context
 
 ```javascript
-// ✅ Good — structured metadata
+// Good — structured metadata
 log.info('Customer created', { customerId: customer._id, garageId });
 
-// ❌ Bad — template string, no structured data
+// Bad — template string, no structured data
 log.info(`Customer ${customer._id} created for garage ${garageId}`);
 ```
 
@@ -298,15 +298,15 @@ log.error('Failed to create customer', { garageId: req.user?.garage?._id, error:
 
 ---
 
-## 🏢 Multi-Tenant (Garage Isolation) Rules
+## Multi-Tenant (Garage Isolation) Rules
 
 **Every data query MUST be scoped to a garage.**
 
 ```javascript
-// ✅ Always filter by garage
+// Always filter by garage
 const customer = await Customer.findOne({ _id: customerId, garage: garageId });
 
-// ❌ Never query without garage scope (data leak!)
+// Never query without garage scope (data leak!)
 const customer = await Customer.findById(customerId);
 ```
 
@@ -318,7 +318,7 @@ const customer = await Customer.findById(customerId);
 
 ---
 
-## 🔐 Security Checklist
+## Security Checklist
 
 - [ ] All routes use `protect` middleware unless intentionally public
 - [ ] Role-based access uses `authorize(...)` with the minimum required roles
@@ -333,7 +333,7 @@ const customer = await Customer.findById(customerId);
 
 ---
 
-## 🗄️ Model / Schema Rules
+## Model / Schema Rules
 
 ```typescript
 import mongoose, { Document, Schema, Types } from 'mongoose';
@@ -382,7 +382,7 @@ export default mongoose.model<IExample>('Example', exampleSchema);
 
 ---
 
-## 📦 Service Layer Rules
+## Service Layer Rules
 
 Services in `services/` handle external integrations (email, SMS, PDF generation, cron jobs).
 
@@ -396,7 +396,51 @@ Services in `services/` handle external integrations (email, SMS, PDF generation
 
 ---
 
-## 🧹 Code Style
+## No Emoji — Plain Text Only
+
+The backend produces plain text: SMS bodies, email subjects and bodies, PDF
+content, log lines, script output, and CI messages. None of them may contain
+emoji.
+
+`[emoji]` below stands in for a literal emoji character — this file stays free
+of them so a repo-wide scan finds zero hits.
+
+```typescript
+// Don't
+const body = `Hi ${customerName}! [emoji]\n\nYour ${make} is due for a service.`;
+const subject = `[emoji] ${serviceLabel} Reminder — ${plate}`;
+console.log('No ownerless garages found. [emoji]');
+log.info('[emoji] Server started');
+
+// Do
+const body = `Hi ${customerName},\n\nYour ${make} is due for a service.`;
+const subject = `${serviceLabel} Reminder — ${plate}`;
+console.log('No ownerless garages found.');
+log.info('Server started');
+```
+
+**This is not cosmetic — each channel breaks differently:**
+
+- **SMS**: one emoji switches the message from GSM-7 to UCS-2, cutting the
+  segment size from 160 to 70 characters. A reminder that fit in one segment
+  now costs two.
+- **PDF**: PDFKit's built-in Helvetica has no glyph for them. This is the same
+  constraint that forces `currencyDisplay: 'code'` in `utils/format.ts` — an
+  emoji renders as a blank box.
+- **Logs**: Winston output goes to files and CI consoles that mangle
+  multi-byte characters, making `grep` unreliable.
+- **Email**: plain-text alternatives and older clients render them as `?`.
+
+Where a glyph carried meaning in text output, use the **word**: `RIGHT` /
+`WRONG`, `Done`, `OK` / `FAIL`. Deleting the glyph and leaving the sentence
+bare loses the information.
+
+This applies to `scripts/`, `.github/workflows/`, `CONTRIBUTING.md`, and commit
+messages as well as runtime code.
+
+---
+
+## Code Style
 
 ### Module System
 - **TypeScript compiled to CommonJS** (`tsconfig.json`: `module: Node16`) — write `import`/`export` syntax, it compiles to `require`/`module.exports`, matching the runtime the project has always used
@@ -428,7 +472,7 @@ import logger from '../utils/logger';
 
 ---
 
-## 🔷 TypeScript Conventions
+## TypeScript Conventions
 
 The whole backend is TypeScript (`strict: true` in `tsconfig.json`). No new `.js` files — everything is `.ts`.
 
@@ -444,7 +488,7 @@ The whole backend is TypeScript (`strict: true` in `tsconfig.json`). No new `.js
 
 ---
 
-## 🧪 Testing Conventions
+## Testing Conventions
 
 Tests use **Vitest** + **Supertest** + **mongodb-memory-server** — a real (ephemeral, local, free) MongoDB instance per test run, not mocks of Mongoose itself. This means tests exercise the actual `garage`-scoping queries, schema validators, and indexes, not a fake approximation of them.
 
@@ -467,7 +511,7 @@ npm test          # single run (vitest run) — what CI runs
 npm run test:watch # watch mode while developing
 ```
 
-## 🔧 Environment Variables
+## Environment Variables
 
 All environment variables MUST be documented in `.env.production.example`:
 
@@ -496,10 +540,11 @@ TWILIO_PHONE=...
 
 ---
 
-## ✅ Pre-Push Checklist
+## Pre-Push Checklist
 
 Before pushing code, verify:
 
+- [ ] No emoji in SMS/email bodies, PDF content, log lines, or script output
 - [ ] No `console.log` — use the `logger` utility instead
 - [ ] All routes are wrapped in `asyncHandler()`
 - [ ] All queries are scoped to `garageId` (unless admin)

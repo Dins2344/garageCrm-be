@@ -160,7 +160,7 @@ export const sendServiceReminder = async ({
   };
   const serviceLabel = typeLabels[reminderType] || 'Service';
 
-  const subject = `🔧 ${serviceLabel} Reminder — ${vehiclePlate} | ${garageName}`;
+  const subject = `${serviceLabel} Reminder — ${vehiclePlate} | ${garageName}`;
 
   const html = `
 <!DOCTYPE html>
@@ -223,7 +223,7 @@ export const sendServiceReminder = async ({
           <tr>
             <td style="background:linear-gradient(135deg,#3b5ff8,#2540ed);border-radius:8px;">
               <a href="tel:${garagePhone}" style="display:inline-block;padding:14px 36px;color:#ffffff;font-weight:600;font-size:15px;text-decoration:none;">
-                📞 Call to Book Now
+                Call to Book Now
               </a>
             </td>
           </tr>

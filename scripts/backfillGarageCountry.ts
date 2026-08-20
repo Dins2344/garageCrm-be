@@ -36,7 +36,7 @@ async function main() {
   console.log(`Would be set to:          ${DEFAULT_COUNTRY}`);
 
   if (missing === 0) {
-    console.log('\nNothing to backfill. ✅');
+    console.log('\nNothing to backfill.');
     await mongoose.disconnect();
     return;
   }
@@ -65,7 +65,7 @@ async function main() {
 
   const remaining = await Garage.countDocuments({ country: { $exists: false } });
   console.log(remaining === 0
-    ? 'Verified: no garages left without a country. ✅'
+    ? 'Verified: no garages left without a country.'
     : `WARNING: ${remaining} still missing a country — investigate.`);
 
   await mongoose.disconnect();
