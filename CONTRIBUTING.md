@@ -545,6 +545,7 @@ TWILIO_PHONE=...
 Before pushing code, verify:
 
 - [ ] No emoji in SMS/email bodies, PDF content, log lines, or script output
+- [ ] Dependencies installed under Node 20 / npm 10 (`nvm use`) — verify with `npx -y npm@10 ci --dry-run`
 - [ ] No `console.log` — use the `logger` utility instead
 - [ ] All routes are wrapped in `asyncHandler()`
 - [ ] All queries are scoped to `garageId` (unless admin)
