@@ -101,8 +101,13 @@ accepted a password committed to this repository.
   what makes `isActive: false` revoke a live session instead of waiting out the
   4-hour token. Do not "optimise" it into a signature-only check.
 - **There is no endpoint that creates an admin**, by design. Use
-  `npx tsx scripts/manageAdmin.ts create <email> "<Name>"`, which needs shell
-  access to the environment.
+  `npx tsx scripts/manageAdmin.ts create <email> "<Name>"` locally, which needs
+  shell access to the environment. **In production the image has no `tsx` and
+  no `scripts/` source** (`npm ci --omit=dev`, and only `dist/` is copied), so
+  there it is
+  `docker compose exec backend node dist/scripts/manageAdmin.js create ...`.
+  Anything under `scripts/` that has to run in production must therefore work
+  as compiled JS — it does, because `tsconfig.json` includes `**/*.ts`.
 
 **Deploying this to an environment that has never had an `admins` collection
 means admin login rejects everything until the script is run.** Seed before or

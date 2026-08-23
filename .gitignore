@@ -1,6 +1,11 @@
 node_modules/
+# Every env variant, including timestamped backups. The bare .env +
+# .env.production pair used to be the whole rule, which left an ad-hoc
+# .env.bak-* untracked-but-committable with real secrets in it.
 .env
-.env.production
+.env.*
+# ...except the checked-in template.
+!.env.*.example
 logs/*.log
 uploads/
 *.tar.gz
