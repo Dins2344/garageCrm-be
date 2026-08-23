@@ -82,6 +82,32 @@ or if a `$ref` points at a schema that does not exist. It caught 17
 undocumented endpoints — every feature added in one recent stretch of work —
 plus schemas left stale by the country/locale change.
 
+## Platform admin lives in the database
+
+Admin identities are documents in the `admins` collection (`models/Admin.ts`),
+not environment variables. They were env vars with hardcoded fallbacks in
+`usecases/adminUsecase.ts`, which meant any deployment that did not set them
+accepted a password committed to this repository.
+
+- **`Admin` is deliberately not a `User` role.** `User.garage` is required
+  because every user belongs to one tenant; a platform admin belongs to none.
+  And `Role` in `types/domain.ts` is hand-mirrored into both client repos, so a
+  `super_admin` value would ripple into two codebases for an actor neither
+  client renders.
+- **`SUPER_ADMIN_SECRET` has no fallback.** The old one was
+  `JWT_SECRET + '_admin'`, which became the literal string `'undefined_admin'`
+  when `JWT_SECRET` was unset. Missing secret now fails the login outright.
+- **`verifyAdminToken` re-reads the admin record on every request.** That is
+  what makes `isActive: false` revoke a live session instead of waiting out the
+  4-hour token. Do not "optimise" it into a signature-only check.
+- **There is no endpoint that creates an admin**, by design. Use
+  `npx tsx scripts/manageAdmin.ts create <email> "<Name>"`, which needs shell
+  access to the environment.
+
+**Deploying this to an environment that has never had an `admins` collection
+means admin login rejects everything until the script is run.** Seed before or
+alongside the deploy, not after.
+
 ## Multi-tenancy is a security boundary
 
 ```typescript

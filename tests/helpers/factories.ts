@@ -1,5 +1,6 @@
 import request from 'supertest';
 import app from '../../app';
+import Admin from '../../models/Admin';
 
 let phoneCounter = 0;
 /** Deterministic, valid-looking 10-digit Indian phone number, unique per call. */
@@ -57,3 +58,35 @@ export async function addGarageToOwner(token: string, name: string) {
     .set(authHeader(token))
     .send({ name, phone: nextPhone() });
 }
+
+// ─── Platform super-admin ──────────────────────────────────────────────────
+// The global afterEach in tests/setup.ts wipes every collection, so an admin
+// has to be seeded inside the test that needs one, not once for the file.
+
+export const ADMIN_EMAIL = 'platform-admin@example.com';
+export const ADMIN_PASSWORD = 'test-admin-password-12chars';
+
+/** Seeds an active super-admin. Password is hashed by the model's save hook. */
+export async function createSuperAdmin(overrides: Partial<{ email: string; name: string; password: string; isActive: boolean }> = {}) {
+  return Admin.create({
+    email: overrides.email ?? ADMIN_EMAIL,
+    name: overrides.name ?? 'Platform Admin',
+    password: overrides.password ?? ADMIN_PASSWORD,
+    isActive: overrides.isActive ?? true
+  });
+}
+
+/** Seeds an admin and returns a valid bearer token for it. */
+export async function loginAsSuperAdmin(): Promise<string> {
+  await createSuperAdmin();
+  const res = await request(app).post('/api/admin/login').send({
+    email: ADMIN_EMAIL,
+    password: ADMIN_PASSWORD
+  });
+  if (!res.body.token) {
+    throw new Error(`Admin login failed in test setup: ${JSON.stringify(res.body)}`);
+  }
+  return res.body.token as string;
+}
+
+export const adminHeader = (token: string) => ({ Authorization: `Bearer ${token}` });

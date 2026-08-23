@@ -7,8 +7,8 @@ process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test_jwt_secret_do_not_use_in_prod';
 process.env.JWT_EXPIRE = process.env.JWT_EXPIRE || '1h';
 process.env.CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
-process.env.SUPER_ADMIN_EMAIL = 'admin@test.local';
-process.env.SUPER_ADMIN_PASSWORD = 'test-admin-password';
+// Admin identity lives in the database now — see tests/helpers/factories.ts
+// createSuperAdmin(). Only the token-signing secret is env-supplied.
 process.env.SUPER_ADMIN_SECRET = 'test_admin_secret';
 
 // Never hit real SMTP/Twilio during tests.

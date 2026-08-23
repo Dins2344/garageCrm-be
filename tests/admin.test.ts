@@ -5,17 +5,9 @@ import app from '../app';
 import Garage from '../models/Garage';
 import User from '../models/User';
 import ServiceReminder from '../models/ServiceReminder';
-import { createGarageWithOwner, nextPhone, authHeader } from './helpers/factories';
+import { createGarageWithOwner, nextPhone, authHeader, loginAsSuperAdmin, adminHeader } from './helpers/factories';
 
-async function adminLogin() {
-  const res = await request(app).post('/api/admin/login').send({
-    email: process.env.SUPER_ADMIN_EMAIL,
-    password: process.env.SUPER_ADMIN_PASSWORD
-  });
-  return res.body.token as string;
-}
-
-const adminHeader = (token: string) => ({ Authorization: `Bearer ${token}` });
+const adminLogin = loginAsSuperAdmin;
 
 describe('Admin: delete user', () => {
   it('returns 404 for a non-existent user', async () => {

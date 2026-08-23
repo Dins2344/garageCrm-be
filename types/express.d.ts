@@ -10,6 +10,8 @@ export type AuthenticatedUser = Omit<HydratedDocument<IUser>, 'garage'> & {
 
 export interface AdminTokenPayload {
   isSuperAdmin: true;
+  /** Admin document id — the token is resolved back to a record on every request. */
+  sub: string;
   email: string;
   iat?: number;
   exp?: number;

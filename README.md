@@ -52,13 +52,26 @@ only the `.example` is tracked.
 | `CLIENT_URL` | yes | Web app origin, used for CORS and password-reset links |
 | `SMTP_HOST` `SMTP_PORT` `SMTP_SECURE` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` | no | Email. Unset means email is logged, not sent |
 | `TWILIO_ACCOUNT_SID` `TWILIO_AUTH_TOKEN` `TWILIO_PHONE_NUMBER` | no | SMS. Unset means SMS is logged, not sent |
-| `SUPER_ADMIN_EMAIL` `SUPER_ADMIN_PASSWORD` `SUPER_ADMIN_SECRET` | **yes in production** | See the warning below |
+| `SUPER_ADMIN_SECRET` | **yes in production** | Signing key for platform-admin tokens. Must differ from `JWT_SECRET`. No fallback — admin login returns 500 without it |
 
-> **Set the `SUPER_ADMIN_*` variables in any deployed environment.**
-> `usecases/adminUsecase.ts` falls back to a hardcoded email and password when
-> they are missing, so an environment that does not set them exposes the
-> platform-admin console on publicly known credentials. They are deliberately
-> absent from `.env.production.example`; add them to your deployment's secrets.
+### Platform admin
+
+Admin identities live in the `admins` collection, not in environment
+variables, and there is no endpoint that creates one. Bootstrap a deployment
+from a shell with access to `MONGODB_URI`:
+
+```bash
+npx tsx scripts/manageAdmin.ts create you@example.com "Your Name"
+```
+
+That prints a generated password once; it is stored only as a bcrypt hash and
+cannot be recovered, only reset. The same script lists, resets and
+deactivates. Deactivating revokes live sessions on their next request rather
+than waiting out the 4-hour token.
+
+`SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` are no longer read. They were
+env vars with hardcoded fallbacks in the source, so any deployment that did not
+set them accepted a password published in this repository.
 
 ## Scripts
 

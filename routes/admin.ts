@@ -8,7 +8,7 @@ const log = logger.child('AdminRoute');
 // ─── Admin auth middleware ─────────────────────────────────────────────────
 // Validates the super-admin JWT on every protected route.
 // Token verification logic lives in adminUsecase — the middleware just orchestrates.
-function adminAuth(req: Request, res: Response, next: NextFunction): void {
+async function adminAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) {
     log.warn('Admin request rejected — no token provided', { ip: req.ip, url: req.originalUrl });
@@ -16,7 +16,10 @@ function adminAuth(req: Request, res: Response, next: NextFunction): void {
     return;
   }
   try {
-    req.admin = adminUsecase.verifyAdminToken(token);
+    // Async because the admin record is re-read on every request, so a
+    // deactivated account loses access immediately rather than when its token
+    // expires. See adminUsecase.verifyAdminToken.
+    req.admin = await adminUsecase.verifyAdminToken(token);
     next();
   } catch (error) {
     const err = error as Error & { statusCode?: number };

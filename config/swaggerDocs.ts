@@ -1470,9 +1470,11 @@
  *     tags: [Admin]
  *     summary: Sign in to the platform-admin console
  *     description: >
- *       Credentials come from the `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD`
- *       environment variables. Issues a short-lived token signed with a
- *       separate secret from normal user JWTs.
+ *       Credentials are stored in the `admins` collection and managed with
+ *       `scripts/manageAdmin.ts` — there is no endpoint that creates an admin.
+ *       Issues a token valid for 4 hours, signed with `SUPER_ADMIN_SECRET`,
+ *       which is a different secret from normal user JWTs. Deactivating an
+ *       admin revokes its live tokens on their next request.
  *     security: []
  *     requestBody:
  *       required: true
