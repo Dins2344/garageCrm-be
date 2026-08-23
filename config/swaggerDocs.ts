@@ -26,6 +26,10 @@
  *     description: Dashboard statistics
  *   - name: Public
  *     description: Public endpoints (no auth required)
+ *   - name: Meta
+ *     description: Static reference data (no auth required)
+ *   - name: Admin
+ *     description: Platform super-admin console — cross-tenant, separate auth
  *   - name: Health
  *     description: System health check
  */
@@ -1042,6 +1046,574 @@
  *                       type: string
  *                 environment:
  *                   type: string
+ */
+
+// ════════════════════════════════════════
+// AUTH — PASSWORD RESET & SESSION
+// ════════════════════════════════════════
+
+/**
+ * @swagger
+ * /auth/logout:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Clear the auth cookie
+ *     description: >
+ *       Clears the httpOnly cookie. Mobile clients hold the JWT themselves and
+ *       simply discard it, so this is a no-op for them.
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Logged out
+ */
+
+/**
+ * @swagger
+ * /auth/forgotpassword:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Send a password-reset link (garage owners only)
+ *     description: >
+ *       Only an account with the `owner` role receives a link. Staff passwords
+ *       are managed by their owner or an admin from Settings. The response is
+ *       deliberately identical whether or not the email matches an account, so
+ *       it cannot be used to discover which addresses are registered.
+ *       Rate limited.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email]
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: owner@garagepulse.com
+ *     responses:
+ *       200:
+ *         description: Always returned when the request is well-formed, regardless of whether the account exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/MessageResponse'
+ *       429:
+ *         description: Too many reset requests
+ */
+
+/**
+ * @swagger
+ * /auth/resetpassword/{token}:
+ *   put:
+ *     tags: [Auth]
+ *     summary: Set a new password using a reset token
+ *     security: []
+ *     parameters:
+ *       - in: path
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Token from the emailed reset link
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [password]
+ *             properties:
+ *               password:
+ *                 type: string
+ *                 minLength: 6
+ *                 example: newsecurepass123
+ *     responses:
+ *       200:
+ *         description: Password updated, returns a fresh session
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       400:
+ *         description: Token invalid or expired
+ *       429:
+ *         description: Too many attempts
+ */
+
+/**
+ * @swagger
+ * /auth/changepassword:
+ *   put:
+ *     tags: [Auth]
+ *     summary: Change your own password (alias of /auth/updatepassword)
+ *     description: >
+ *       Identical behaviour to `PUT /auth/updatepassword`. Both paths exist
+ *       because published mobile builds call one and the web app the other —
+ *       neither can be removed without breaking a client in the wild.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ChangePasswordRequest'
+ *     responses:
+ *       200:
+ *         description: Password changed
+ *       401:
+ *         description: Current password incorrect
+ */
+
+// ════════════════════════════════════════
+// GARAGE — BRANCHES
+// ════════════════════════════════════════
+
+/**
+ * @swagger
+ * /garage/branches:
+ *   get:
+ *     tags: [Garage]
+ *     summary: List every branch owned by the caller (owner only)
+ *     responses:
+ *       200:
+ *         description: Branch list, each with its resolved locale
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 count: { type: number }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Garage'
+ *       403:
+ *         description: Caller is not an owner
+ *   post:
+ *     tags: [Garage]
+ *     summary: Create an additional branch (owner only)
+ *     description: >
+ *       The new branch inherits `country` and the seeded settings from the
+ *       owner's oldest garage. Branch names must be unique per owner.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, phone]
+ *             properties:
+ *               name: { type: string, example: 'Downtown Branch' }
+ *               phone: { type: string, example: '9876543210' }
+ *               email: { type: string, format: email }
+ *               gstNumber: { type: string }
+ *               address: { $ref: '#/components/schemas/Address' }
+ *     responses:
+ *       201:
+ *         description: Branch created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Garage'
+ *       400:
+ *         description: Duplicate branch name, or the free-plan branch cap was reached
+ */
+
+/**
+ * @swagger
+ * /garage/branches/{id}/staff:
+ *   get:
+ *     tags: [Garage]
+ *     summary: List the staff assigned to one branch (owner only)
+ *     description: Used to preview who is affected before deleting a branch.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Staff assigned to that branch
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/User'
+ *       403:
+ *         description: Caller is not the owner of that branch
+ */
+
+/**
+ * @swagger
+ * /garage/branches/{id}:
+ *   delete:
+ *     tags: [Garage]
+ *     summary: Delete a branch (owner only)
+ *     description: >
+ *       Refuses to delete an owner's last remaining branch. Staff assigned to
+ *       the branch must be handled explicitly via `staffAction`: `delete`
+ *       removes them, `reassign` moves them to `reassignToGarageId`. All data
+ *       scoped to the branch is removed with it.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               staffAction:
+ *                 type: string
+ *                 enum: [delete, reassign]
+ *               reassignToGarageId:
+ *                 type: string
+ *                 description: Required when staffAction is 'reassign'
+ *     responses:
+ *       200:
+ *         description: Branch deleted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     fallbackGarageId:
+ *                       type: string
+ *                       description: Branch the caller is switched to if the deleted one was active
+ *       400:
+ *         description: Last remaining branch, or staff present with no staffAction given
+ */
+
+// ════════════════════════════════════════
+// META — REFERENCE DATA
+// ════════════════════════════════════════
+
+/**
+ * @swagger
+ * /meta/countries:
+ *   get:
+ *     tags: [Meta]
+ *     summary: Supported countries for the signup and settings pickers
+ *     description: >
+ *       Unauthenticated on purpose — the registration form needs this before a
+ *       user exists. Static reference data; clients cache it per page load.
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Supported countries
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/CountryOption'
+ */
+
+// ════════════════════════════════════════
+// DASHBOARD — CHARTS
+// ════════════════════════════════════════
+
+/**
+ * @swagger
+ * /dashboard/charts:
+ *   get:
+ *     tags: [Dashboard]
+ *     summary: Revenue trend and job-status breakdown for a date range
+ *     description: >
+ *       Axis labels are formatted server-side in the garage's locale, so the
+ *       client renders them as-is.
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         required: true
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: endDate
+ *         required: true
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: groupBy
+ *         schema:
+ *           type: string
+ *           enum: [day, week, month]
+ *           default: day
+ *     responses:
+ *       200:
+ *         description: Chart data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     revenueTrend:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           key: { type: string }
+ *                           label: { type: string, description: 'Pre-formatted in the garage locale' }
+ *                           revenue: { type: number }
+ *                           invoiceCount: { type: number }
+ *                     jobStatusBreakdown:
+ *                       type: object
+ *                       additionalProperties: { type: number }
+ */
+
+// ════════════════════════════════════════
+// VEHICLES — SERVICE HISTORY
+// ════════════════════════════════════════
+
+/**
+ * @swagger
+ * /vehicles/{id}/history:
+ *   get:
+ *     tags: [Vehicles]
+ *     summary: Paginated job-card history for one vehicle
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: page
+ *         schema: { type: number, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: number, default: 10 }
+ *     responses:
+ *       200:
+ *         description: Job cards for this vehicle, newest first
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/PaginatedResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/JobCard'
+ *       404:
+ *         description: Vehicle not found in the caller's garage
+ */
+
+// ════════════════════════════════════════
+// USERS — ACTIVATE / DEACTIVATE
+// ════════════════════════════════════════
+
+/**
+ * @swagger
+ * /users/{id}/{action}:
+ *   patch:
+ *     tags: [Users]
+ *     summary: Activate or deactivate a staff member (owner/admin only)
+ *     description: >
+ *       Deactivating blocks sign-in while preserving the person's history on
+ *       job cards and invoices — prefer it to deletion.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *       - in: path
+ *         name: action
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [activate, deactivate]
+ *     responses:
+ *       200:
+ *         description: Staff status updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ *       404:
+ *         description: Staff member not found in the caller's garage
+ */
+
+// ════════════════════════════════════════
+// ADMIN — PLATFORM CONSOLE
+// ════════════════════════════════════════
+// Cross-tenant by design and gated behind a separate super-admin JWT
+// (AdminAuth), not the per-garage BearerAuth used everywhere else.
+
+/**
+ * @swagger
+ * /admin/login:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Sign in to the platform-admin console
+ *     description: >
+ *       Credentials come from the `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD`
+ *       environment variables. Issues a short-lived token signed with a
+ *       separate secret from normal user JWTs.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/LoginRequest'
+ *     responses:
+ *       200:
+ *         description: Admin token issued
+ *       401:
+ *         description: Invalid admin credentials
+ */
+
+/**
+ * @swagger
+ * /admin/verify:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Check that an admin token is still valid
+ *     security:
+ *       - AdminAuth: []
+ *     responses:
+ *       200:
+ *         description: Token valid
+ *       401:
+ *         description: Token missing, invalid or expired
+ */
+
+/**
+ * @swagger
+ * /admin/stats:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Platform-wide counts and revenue
+ *     description: >
+ *       Revenue is summed across every tenant and can therefore mix
+ *       currencies — it carries no single currency and must not be rendered
+ *       with one.
+ *     security:
+ *       - AdminAuth: []
+ *     responses:
+ *       200:
+ *         description: Platform statistics
+ *       401:
+ *         description: Unauthorized
+ */
+
+/**
+ * @swagger
+ * /admin/garages:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Every garage, with per-garage counts, revenue and resolved locale
+ *     security:
+ *       - AdminAuth: []
+ *     responses:
+ *       200:
+ *         description: Enriched garage list
+ *       401:
+ *         description: Unauthorized
+ */
+
+/**
+ * @swagger
+ * /admin/garages/{id}:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Delete an ownerless (orphaned) garage
+ *     description: >
+ *       Deliberately refuses any garage that still has an owner — that is a
+ *       real business with real data. This exists to clean up garages left
+ *       behind by a registration failure.
+ *     security:
+ *       - AdminAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Orphaned garage deleted
+ *       400:
+ *         description: Refused — the garage has an owner
+ *       404:
+ *         description: Garage not found
+ */
+
+/**
+ * @swagger
+ * /admin/users:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Every user across all garages
+ *     security:
+ *       - AdminAuth: []
+ *     responses:
+ *       200:
+ *         description: User list
+ *       401:
+ *         description: Unauthorized
+ */
+
+/**
+ * @swagger
+ * /admin/users/{id}:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Delete a user, cascading their data
+ *     description: >
+ *       Deleting an owner also deletes every garage they own and all data
+ *       scoped to those garages. Deleting a staff member removes only that
+ *       account. Irreversible.
+ *     security:
+ *       - AdminAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: User deleted, with a summary of what was cascaded
+ *       404:
+ *         description: User not found
+ */
+
+/**
+ * @swagger
+ * /admin/health:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Process, memory, CPU and database health
+ *     security:
+ *       - AdminAuth: []
+ *     responses:
+ *       200:
+ *         description: System health
+ *       401:
+ *         description: Unauthorized
  */
 
 export {};
