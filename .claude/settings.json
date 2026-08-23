@@ -1,0 +1,16 @@
+{
+  "$comment": "Shared project settings, committed. Personal overrides belong in settings.local.json, which is gitignored. Only read-only or verification commands are pre-allowed here.",
+  "permissions": {
+    "allow": [
+      "Bash(npm test)",
+      "Bash(npm test *)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run build)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx vitest run *)",
+      "Bash(npx vitest run)",
+      "Bash(npx -y npm@10 ci --dry-run)",
+      "Bash(curl -s -m 2 http://localhost:5000/api/health)"
+    ]
+  }
+}

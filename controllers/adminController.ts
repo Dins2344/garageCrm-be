@@ -5,11 +5,11 @@ const log = logger.child('AdminController');
 
 // @desc    Admin login — returns a short-lived JWT
 // @route   POST /api/admin/login
-export const login = (req: Request, res: Response, next: NextFunction): void => {
+export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { email, password } = req.body;
     log.info('Admin login request received', { email });
-    const { token, admin } = adminUsecase.adminLogin({ email, password });
+    const { token, admin } = await adminUsecase.adminLogin({ email, password });
     res.json({ success: true, token, data: admin });
   } catch (error) {
     log.error('Admin login error', { error: (error as Error).message });

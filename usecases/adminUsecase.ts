@@ -1,6 +1,8 @@
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import os from 'os';
+import Admin from '../models/Admin';
 import User from '../models/User';
 import Garage from '../models/Garage';
 import Customer from '../models/Customer';
@@ -16,10 +18,30 @@ import { AdminTokenPayload } from '../types/express';
 
 const log = logger.child('AdminUsecase');
 
-// ─── Credentials (env-based) ───────────────────────────────────────────────
-const ADMIN_EMAIL    = process.env.SUPER_ADMIN_EMAIL    || 'superadmin@garagepulse.com';
-const ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || 'GaragePulse@Admin2026';
-const ADMIN_SECRET   = process.env.SUPER_ADMIN_SECRET   || (process.env.JWT_SECRET + '_admin');
+// A real bcrypt hash of a value nobody knows, compared against when the email
+// does not exist so that login timing does not reveal which emails are admins.
+const DUMMY_HASH = '$2b$12$C6UzMDM.H6dfI/f/IKcEeO3Uh1PJ8h1kQhVQF0Z0j4kQhVQF0Z0j4';
+
+// ─── Credentials ───────────────────────────────────────────────────────────
+// Admin identities live in the `admins` collection (see models/Admin.ts), not
+// in environment variables. Only the token-signing secret is env-supplied.
+//
+// Read lazily rather than at module load: `app.ts` is imported by every test
+// and by `scripts/`, and throwing during import would take all of them down
+// instead of just the admin login path.
+const adminSecret = (): string => {
+  const secret = process.env.SUPER_ADMIN_SECRET;
+  if (!secret) {
+    // No fallback on purpose. The previous default was `JWT_SECRET + '_admin'`,
+    // which silently became the literal string 'undefined_admin' whenever
+    // JWT_SECRET was unset — a guessable signing key for platform-wide access.
+    log.error('SUPER_ADMIN_SECRET is not set — admin authentication is disabled');
+    throw new HttpError('Admin authentication is not configured', 500);
+  }
+  return secret;
+};
+
+const TOKEN_TTL = '4h';
 
 interface AdminLoginInput {
   email: string;
@@ -27,36 +49,83 @@ interface AdminLoginInput {
 }
 
 /**
- * Validate admin credentials and issue a short-lived JWT.
- * Returns the signed token and the admin payload on success.
- * Throws 401 if credentials are invalid.
+ * Validate admin credentials against the database and issue a short-lived JWT.
+ * Throws 401 if the email is unknown, the password is wrong, or the account is
+ * deactivated — all three produce the same message so the response cannot be
+ * used to enumerate admin accounts.
  */
-export const adminLogin = ({ email, password }: AdminLoginInput): { token: string; admin: { email: string; role: string } } => {
-  log.info('Admin login attempt', { email });
+export const adminLogin = async ({ email, password }: AdminLoginInput): Promise<{ token: string; admin: { id: string; name: string; email: string; role: string } }> => {
+  const normalisedEmail = String(email || '').toLowerCase().trim();
+  log.info('Admin login attempt', { email: normalisedEmail });
 
-  if (email !== ADMIN_EMAIL || password !== ADMIN_PASSWORD) {
-    log.warn('Admin login failed — invalid credentials', { email });
+  const secret = adminSecret();
+
+  // `password` is `select: false` on the schema, so it has to be asked for.
+  const admin = await Admin.findOne({ email: normalisedEmail }).select('+password');
+
+  // Run the compare even when there is no such admin, against a dummy hash, so
+  // an unknown email and a wrong password take the same time to answer.
+  const passwordMatches = admin
+    ? await admin.matchPassword(password || '')
+    : await bcrypt.compare(password || '', DUMMY_HASH);
+
+  if (!admin || !passwordMatches || !admin.isActive) {
+    log.warn('Admin login failed', {
+      email: normalisedEmail,
+      reason: !admin ? 'no such admin' : !passwordMatches ? 'bad password' : 'deactivated'
+    });
     throw new HttpError('Invalid admin credentials', 401);
   }
 
-  const token = jwt.sign({ isSuperAdmin: true, email }, ADMIN_SECRET, { expiresIn: '4h' });
-  log.info('Admin login successful', { email });
-  return { token, admin: { email, role: 'super_admin' } };
+  // Not awaited into the response: a failed bookkeeping write should not fail
+  // an otherwise valid login.
+  Admin.updateOne({ _id: admin._id }, { $set: { lastLoginAt: new Date() } })
+    .catch(err => log.warn('Could not record admin lastLoginAt', { error: (err as Error).message }));
+
+  const token = jwt.sign(
+    { isSuperAdmin: true, sub: admin._id.toString(), email: admin.email },
+    secret,
+    { expiresIn: TOKEN_TTL }
+  );
+
+  log.info('Admin login successful', { adminId: admin._id, email: admin.email });
+  return {
+    token,
+    admin: { id: admin._id.toString(), name: admin.name, email: admin.email, role: 'super_admin' }
+  };
 };
 
 /**
- * Verify an admin JWT.
- * Returns the decoded payload or throws 401.
+ * Verify an admin JWT and confirm the account behind it is still valid.
+ *
+ * The database read is deliberate. A signature check alone would keep a
+ * deleted or deactivated admin working for the rest of the token's 4 hours;
+ * re-reading the record makes deactivation take effect on the next request.
+ * Admin traffic is a handful of requests per session, so the cost is nil.
  */
-export const verifyAdminToken = (token: string): AdminTokenPayload => {
+export const verifyAdminToken = async (token: string): Promise<AdminTokenPayload> => {
+  const secret = adminSecret();
+
+  let decoded: AdminTokenPayload;
   try {
-    const decoded = jwt.verify(token, ADMIN_SECRET) as AdminTokenPayload;
-    if (!decoded.isSuperAdmin) throw new Error('Not a super-admin token');
-    return decoded;
+    decoded = jwt.verify(token, secret) as AdminTokenPayload;
   } catch (err) {
     log.warn('Admin token verification failed', { error: (err as Error).message });
     throw new HttpError('Invalid admin token', 401);
   }
+
+  if (!decoded.isSuperAdmin || !decoded.sub) {
+    log.warn('Admin token rejected — not a super-admin token');
+    throw new HttpError('Invalid admin token', 401);
+  }
+
+  const admin = await Admin.findById(decoded.sub).select('_id email isActive');
+  if (!admin || !admin.isActive) {
+    log.warn('Admin token rejected — account missing or deactivated', { adminId: decoded.sub });
+    throw new HttpError('Invalid admin token', 401);
+  }
+
+  return decoded;
 };
 
 /**

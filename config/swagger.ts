@@ -38,6 +38,14 @@ const options: swaggerJsdoc.Options = {
           scheme: 'bearer',
           bearerFormat: 'JWT',
           description: 'Enter your JWT token obtained from /auth/login'
+        },
+        AdminAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description:
+            'Platform super-admin token from /admin/login. Signed with a separate ' +
+            'secret from user tokens and only accepted on /admin routes.'
         }
       },
       schemas: {
@@ -47,6 +55,49 @@ const options: swaggerJsdoc.Options = {
           properties: {
             success: { type: 'boolean', example: false },
             message: { type: 'string', example: 'Error message' }
+          }
+        },
+        MessageResponse: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean', example: true },
+            message: { type: 'string', example: 'Operation completed' }
+          }
+        },
+
+        // ─── Locale ───
+        // Resolved server-side from the garage's `country` and returned on
+        // garage and auth payloads. Clients must format money, dates and tax
+        // labels from this rather than hardcoding a currency or locale.
+        ResolvedLocale: {
+          type: 'object',
+          properties: {
+            country: { type: 'string', example: 'IN', description: 'ISO 3166-1 alpha-2' },
+            currency: { type: 'string', example: 'INR', description: 'ISO 4217' },
+            locale: { type: 'string', example: 'en-IN', description: 'BCP 47' },
+            taxLabel: { type: 'string', example: 'GST' },
+            taxIdLabel: { type: 'string', example: 'GSTIN' },
+            postalLabel: { type: 'string', example: 'Pincode' },
+            postalInputMode: { type: 'string', enum: ['numeric', 'text'] },
+            phoneExample: { type: 'string', example: '98765 43210' },
+            timezone: { type: 'string', example: 'Asia/Kolkata' }
+          }
+        },
+        CountryOption: {
+          type: 'object',
+          properties: {
+            code: { type: 'string', example: 'GB' },
+            name: { type: 'string', example: 'United Kingdom' },
+            currency: { type: 'string', example: 'GBP' },
+            taxLabel: { type: 'string', example: 'VAT' },
+            taxIdLabel: { type: 'string', example: 'VAT No.' },
+            postalLabel: { type: 'string', example: 'Postcode' },
+            postalInputMode: { type: 'string', enum: ['numeric', 'text'] },
+            phoneExample: { type: 'string', example: '07911 123456' },
+            requiresTimezoneChoice: {
+              type: 'boolean',
+              description: 'True when the country spans several zones and the owner must pick one'
+            }
           }
         },
 
@@ -65,10 +116,29 @@ const options: swaggerJsdoc.Options = {
           properties: {
             name: { type: 'string', example: 'John Doe' },
             email: { type: 'string', format: 'email', example: 'john@garage.com' },
-            phone: { type: 'string', example: '9876543210' },
+            phone: {
+              type: 'string',
+              example: '9876543210',
+              description:
+                'Validated against `country`. A number that is not valid there is rejected with 400.'
+            },
             password: { type: 'string', minLength: 6, example: 'securepass123' },
             garageName: { type: 'string', example: 'SpeedFix Auto' },
             garagePhone: { type: 'string', example: '9876543211' },
+            country: {
+              type: 'string',
+              example: 'IN',
+              description:
+                'ISO 3166-1 alpha-2. Omitted by older clients, in which case it defaults to IN. ' +
+                'Seeds the garage currency, locale, tax label and default tax rate.'
+            },
+            timezone: {
+              type: 'string',
+              example: 'America/Chicago',
+              description:
+                'IANA zone. Only honoured for countries spanning several zones (US, CA, AU); ' +
+                'ignored elsewhere so the country table stays authoritative.'
+            },
             garageAddress: {
               type: 'object',
               properties: {
@@ -93,7 +163,13 @@ const options: swaggerJsdoc.Options = {
                 email: { type: 'string' },
                 phone: { type: 'string' },
                 role: { type: 'string', enum: ['owner', 'admin', 'service_advisor', 'mechanic', 'receptionist'] },
-                garage: { type: 'string' }
+                garage: { type: 'string' },
+                locale: {
+                  allOf: [{ $ref: '#/components/schemas/ResolvedLocale' }],
+                  description:
+                    "The user's home-garage locale. Present on every auth response because " +
+                    'it is the only path a non-owner has to it — staff never load a branch list.'
+                }
               }
             }
           }
@@ -428,8 +504,25 @@ const options: swaggerJsdoc.Options = {
         // ─── Garage ───
         GarageSettings: {
           type: 'object',
+          description:
+            'taxRate and laborRatePerHour are seeded from the country at creation and then ' +
+            'owned by the garage. The presentation overrides below default to an empty string, ' +
+            'meaning "inherit from the country table" — so a later correction to that table ' +
+            'reaches existing garages.',
           properties: {
-            currency: { type: 'string', example: 'INR' },
+            currency: {
+              type: 'string',
+              example: '',
+              description: "Override only. '' means inherit from the garage's country."
+            },
+            locale: { type: 'string', example: '', description: "Override only. '' means inherit." },
+            taxLabel: { type: 'string', example: '', description: "Override only. '' means inherit." },
+            timezone: {
+              type: 'string',
+              example: '',
+              description:
+                "Override only. Set for multi-zone countries (US/CA/AU); '' means inherit."
+            },
             taxRate: { type: 'number', example: 18 },
             laborRatePerHour: { type: 'number', example: 500 },
             serviceReminderDays: { type: 'number', example: 180 }
@@ -443,10 +536,26 @@ const options: swaggerJsdoc.Options = {
             address: { $ref: '#/components/schemas/Address' },
             phone: { type: 'string' },
             email: { type: 'string' },
-            gstNumber: { type: 'string' },
+            gstNumber: {
+              type: 'string',
+              description:
+                'Tax registration number. Field name is historical — it holds a GSTIN, VAT ' +
+                'number, EIN or ABN depending on the country. Render it under locale.taxIdLabel.'
+            },
             logo: { type: 'string' },
+            country: {
+              type: 'string',
+              example: 'IN',
+              description:
+                'ISO 3166-1 alpha-2. Absent on garages created before country support shipped; ' +
+                'those resolve to IN.'
+            },
             owner: { type: 'string' },
             settings: { $ref: '#/components/schemas/GarageSettings' },
+            locale: {
+              allOf: [{ $ref: '#/components/schemas/ResolvedLocale' }],
+              description: 'Server-resolved. Attached to every garage response.'
+            },
             createdAt: { type: 'string', format: 'date-time' },
             updatedAt: { type: 'string', format: 'date-time' }
           }
