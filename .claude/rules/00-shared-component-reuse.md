@@ -25,10 +25,10 @@ forks the design system.
 **Signs a component is generic filler and needs rework:**
 
 - Colors that aren't in the shared palette (`'tomato'`, `'#333'`, `'blue'`)
-- Square corners, or a radius that isn't the documented `rounded-xl`/`2xl`
-  (web) or `16`–`20` (mobile)
-- A flat `1px solid #ccc` border where the rest of the app uses a soft tinted
-  shadow
+- Colours or radii written as literals instead of taken from the app's tokens
+  (`index.css` `@theme` on web, `src/theme.ts` on mobile)
+- A border that does not clear 3:1 against its own ground on an operable
+  control — a divider token and a control-edge token are not interchangeable
 - Default system fonts and weights instead of the established hierarchy
 - A one-off local `StyleSheet`/class that duplicates a shared component's look
 - Inline styles for anything reusable
@@ -40,12 +40,28 @@ the drift is what makes an app feel machine-assembled.
 
 ---
 
-## Premium UI Guidelines
+## UI Guidelines
 
-When building or updating UI components across the web or mobile applications, always adhere to these premium design standards:
+Both clients now run the **Service Counter** system — warm bone grounds, ink
+for standing dark bands, signal orange rationed to one committing action.
+`frontend/DESIGN.md` is the normative spec; `mobile/src/theme.ts` is mobile's
+implementation of the same palette.
 
-1. **Typography**: Prefer modern sans-serif fonts (e.g., `Outfit` and `Inter` on the web). Maintain strong visual hierarchy with bold headings.
-2. **Glassmorphism & Depth**: Favor semi-transparent backgrounds with `backdrop-blur` (web) and multi-layered soft shadows (e.g., `--shadow-premium`) over flat colors and rigid borders.
-3. **Micro-animations (Web)**: All interactive elements must have satisfying transition states (`active:scale-95`, `hover:-translate-y-1`, smooth fade-ins).
-4. **Shapes & Radiuses**: Use softer border radiuses (`rounded-xl` or `rounded-2xl` on web, `borderRadius: 16` to `20` on mobile) instead of sharp, rigid boxes.
-5. **Mobile Shadows**: For React Native, use deep, tinted shadows to simulate elevation (e.g., `shadowColor: '#6366f1', shadowOpacity: 0.1, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }`). Avoid harsh `borderColor` boundaries on cards.
+1. **Tokens, never literals.** Web takes colour, radius and depth from the
+   `@theme` block in `index.css`; mobile from `src/theme.ts`. Neither app has
+   a hex literal outside those files — do not add the first one.
+2. **Grounds are bone, not white or grey.** `bone-100` is the page field,
+   `bone-50` is a panel, `ink-900` is a standing dark band.
+3. **A divider and a control edge are different tokens.** `bone-200` divides;
+   `bone-400` draws the edge of anything a user operates and is the one that
+   clears 3:1. Getting this wrong produces a border nobody can see.
+4. **Shapes.** Web is square — radius `0` everywhere, enforced from the theme.
+   Mobile keeps a small radius (`radius.lg` = 10) and real Android elevation,
+   because zero radius reads as deliberate on a web page and as unfinished
+   against Material's conventions. The palette and type scale are shared; the
+   corner radius deliberately is not.
+5. **Depth.** Web has no shadows at all — depth is a ground change plus a
+   one-pixel rule. Mobile keeps `elevation.*` for Android, tinted warm rather
+   than indigo, because a cool shadow on a warm ground reads as dirt.
+6. **Colour is rationed.** Orange marks the one action that completes a flow.
+   A second orange element on the same screen means one of them is not that.
