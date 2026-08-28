@@ -42,8 +42,8 @@ screens is a coincidence rather than a shared meaning, leave both inline.
 app, and that is exactly how `garagepulse_web_banner_dismissed` came to be
 missing from logout's cleanup — the "More on the web" banner never reappeared,
 and on a shared garage device one person dismissing it hid it from everyone who
-logged in afterwards. Mobile now clears `ALL_STORAGE_KEYS` as a list, so a new
-key is cleaned up by being declared.
+logged in afterwards. Mobile clears a declared list on sign-out rather than
+naming keys at the call site, so a new key is cleaned up by being declared.
 
 ---
 

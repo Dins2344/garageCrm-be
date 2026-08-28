@@ -138,6 +138,17 @@ usecases.
   have no key at all — resolvers must tolerate `undefined`.
 - **A unique compound index silently fails to build** when violating data
   already exists. `config/db.ts` logs index state at boot; check it.
+- **`Customer.vehicles` is denormalised, and both clients render its `.length`
+  as the vehicle count.** Every write path that changes who owns a vehicle has
+  to maintain it: registration `$addToSet`s, deletion `$pull`s, and
+  reassignment has to do both. `updateVehicleData` originally did neither, so
+  changing a vehicle's owner left it counted against the old customer forever
+  and never counted against the new one — visible on web and mobile alike,
+  because the wrong number was coming from the API. Use `$addToSet` rather than
+  `$push` so a retried request cannot double-count, and scope the customer
+  update by `garage` like any other query. `tests/vehicleOwnership.test.ts`
+  pins it; `scripts/repairCustomerVehicles.ts` recomputes the arrays for
+  documents the bug already touched.
 
 ## Locale and formatting
 

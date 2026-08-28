@@ -62,10 +62,12 @@ export const registerVehicle = async ({ vehicleData, garageId }: RegisterInput) 
   const dataWithGarage = { ...vehicleData, garage: garageId };
   const vehicle = await Vehicle.create(dataWithGarage);
 
-  // side effect: update customer's vehicles list
-  await Customer.findByIdAndUpdate(vehicle.customer, {
-    $push: { vehicles: vehicle._id }
-  });
+  // side effect: update customer's vehicles list. Garage-scoped and
+  // $addToSet for the same reasons as the reassignment path below.
+  await Customer.findOneAndUpdate(
+    { _id: vehicle.customer, garage: garageId },
+    { $addToSet: { vehicles: vehicle._id } }
+  );
 
   log.info('New vehicle registered', { vehicleId: vehicle._id, customerId: vehicle.customer });
   return vehicle;
@@ -78,6 +80,28 @@ interface UpdateInput {
 }
 
 export const updateVehicleData = async ({ vehicleId, garageId, updateData }: UpdateInput) => {
+  // Read the current owner *before* writing, because that is the only place
+  // the old owner is recorded once the update lands.
+  const existing = await Vehicle.findOne({ _id: vehicleId, garage: garageId }).select('customer').lean();
+
+  if (!existing) {
+    throw new HttpError('Vehicle not found', 404);
+  }
+
+  const previousOwner = existing.customer?.toString();
+  const requestedOwner = updateData.customer?.toString();
+  const ownerIsChanging = !!requestedOwner && requestedOwner !== previousOwner;
+
+  // The new owner has to be a customer of *this* garage. Without this check a
+  // client could hand us any customer id and we would both point the vehicle
+  // across a tenant boundary and mutate that other garage's customer below.
+  if (ownerIsChanging) {
+    const newOwnerExists = await Customer.exists({ _id: requestedOwner, garage: garageId });
+    if (!newOwnerExists) {
+      throw new HttpError('Customer not found', 404);
+    }
+  }
+
   const vehicle = await Vehicle.findOneAndUpdate(
     { _id: vehicleId, garage: garageId },
     updateData,
@@ -86,6 +110,28 @@ export const updateVehicleData = async ({ vehicleId, garageId, updateData }: Upd
 
   if (!vehicle) {
     throw new HttpError('Vehicle not found', 404);
+  }
+
+  // `Customer.vehicles` is denormalised, so reassigning a vehicle has to move
+  // it by hand. Registration pushes and deletion pulls; this path did neither,
+  // which left the vehicle counted against its old owner forever and never
+  // counted against its new one. Both clients read `customer.vehicles.length`
+  // directly, so the stale count showed up on web and mobile alike.
+  if (ownerIsChanging) {
+    await Promise.all([
+      Customer.findOneAndUpdate(
+        { _id: previousOwner, garage: garageId },
+        { $pull: { vehicles: vehicle._id } }
+      ),
+      // $addToSet, not $push: a retried request must not add a second copy of
+      // the same id and inflate the count.
+      Customer.findOneAndUpdate(
+        { _id: requestedOwner, garage: garageId },
+        { $addToSet: { vehicles: vehicle._id } }
+      ),
+    ]);
+
+    log.info('Vehicle owner changed', { vehicleId, from: previousOwner, to: requestedOwner });
   }
 
   return vehicle;
@@ -104,7 +150,10 @@ export const removeVehicle = async ({ vehicleId, garageId }: RemoveInput): Promi
   }
 
   // side effect: remove from customer's vehicles list
-  await Customer.findByIdAndUpdate(vehicle.customer, { $pull: { vehicles: vehicle._id } });
+  await Customer.findOneAndUpdate(
+    { _id: vehicle.customer, garage: garageId },
+    { $pull: { vehicles: vehicle._id } }
+  );
 
   log.info('Vehicle removed from registry', { vehicleId, garageId });
   return true;
