@@ -61,7 +61,12 @@ variables, and there is no endpoint that creates one. Bootstrap a deployment
 from a shell with access to `MONGODB_URI`:
 
 ```bash
+# Local / any checkout with devDependencies:
 npx tsx scripts/manageAdmin.ts create you@example.com "Your Name"
+
+# On the deployed server. The production image has no `tsx` and no `scripts/`
+# source — it ships the compiled `dist/` only — so run the built script:
+docker compose exec backend node dist/scripts/manageAdmin.js create you@example.com "Your Name"
 ```
 
 That prints a generated password once; it is stored only as a bcrypt hash and
