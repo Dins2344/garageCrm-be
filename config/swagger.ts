@@ -616,6 +616,50 @@ const options: swaggerJsdoc.Options = {
           }
         },
 
+        // ─── Mobile App Release ───
+        AppUpdateDecision: {
+          type: 'object',
+          description:
+            'What a given app build is told about updates. Every field is always present — never omitted, never null — because published mobile builds cannot be force-upgraded and two client generations would read a sometimes-absent field differently.',
+          properties: {
+            updateAvailable: { type: 'boolean', description: 'A newer version exists on the store' },
+            updateRequired: { type: 'boolean', description: 'This build is below the minimum and must not be used' },
+            latestVersion: { type: 'string', example: '1.1.0', description: 'Empty when there is no policy' },
+            storeUrl: {
+              type: 'string',
+              description:
+                'Store listing. Present for iOS, whose App Store id is assigned by Apple and is not knowable from app.json. Android clients deliberately ignore this and use their own compiled-in constant — the store link is the escape hatch when a bad policy has blocked the app, so it must not come from the same document that did the blocking.'
+            },
+            message: { type: 'string', description: 'Copy to show; the blocking message when required' },
+            receivedVersion: {
+              type: 'string',
+              description: 'Echo of the version query param, so a client can detect a cached or misrouted response'
+            }
+          }
+        },
+
+        AppReleasePolicy: {
+          type: 'object',
+          description: 'The stored mobile release policy. One document per platform.',
+          properties: {
+            platform: { type: 'string', enum: ['android', 'ios'] },
+            latestVersion: { type: 'string', example: '1.1.0' },
+            minSupportedVersion: {
+              type: 'string',
+              example: '',
+              description: 'Builds below this are blocked. An empty string means nobody is blocked — this is the undo path for a bad policy, so it must stay clearable.'
+            },
+            storeUrl: { type: 'string' },
+            updateMessage: { type: 'string' },
+            blockingMessage: { type: 'string' },
+            enabled: {
+              type: 'boolean',
+              description: 'Kill switch. While false the endpoint reports no update and blocks nobody, whatever the versions say.'
+            },
+            updatedBy: { type: 'string', description: 'Email of the admin who last saved' }
+          }
+        },
+
         // ─── Paginated Response ───
         PaginatedResponse: {
           type: 'object',

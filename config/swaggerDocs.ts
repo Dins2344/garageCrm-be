@@ -1618,4 +1618,113 @@
  *         description: Unauthorized
  */
 
+// ════════════════════════════════════════
+// META — APP RELEASE
+// ════════════════════════════════════════
+
+/**
+ * @swagger
+ * /meta/app-update:
+ *   get:
+ *     tags: [Meta]
+ *     summary: Whether the calling app build should update, and whether it must
+ *     description: >
+ *       Unauthenticated on purpose — this runs on a cold start before anyone has
+ *       logged in, and again on resume from background. Both query params are
+ *       optional: a missing, empty or unparseable version, an unknown platform, a
+ *       missing policy document, or a policy with enabled false all return
+ *       updateAvailable false and updateRequired false with a 200. This handler
+ *       has no 4xx by design — the client must fail open regardless, and a 400
+ *       would only invite someone to handle it properly later, which is how a
+ *       fail-closed branch gets written. Sent with Cache-Control no-store,
+ *       because the answer is per-version and no proxy may share one.
+ *     security: []
+ *     parameters:
+ *       - in: query
+ *         name: platform
+ *         required: false
+ *         schema: { type: string, enum: [android, ios] }
+ *       - in: query
+ *         name: version
+ *         required: false
+ *         schema: { type: string, example: '1.0.9' }
+ *         description: The app's own semver, from app.json
+ *     responses:
+ *       200:
+ *         description: The decision for this build
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/AppUpdateDecision'
+ */
+
+/**
+ * @swagger
+ * /admin/app-release:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Read the mobile release policy for a platform
+ *     description: >
+ *       Returns null in data when no policy has been saved yet. That is a normal
+ *       state, not a 404 — the console has to render and create from it.
+ *     security:
+ *       - AdminAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: platform
+ *         required: false
+ *         schema: { type: string, enum: [android, ios], default: android }
+ *     responses:
+ *       200:
+ *         description: The stored policy, or null
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/AppReleasePolicy'
+ *       401:
+ *         description: Unauthorized
+ *   put:
+ *     tags: [Admin]
+ *     summary: Save the mobile release policy for a platform
+ *     description: >
+ *       Upserts one document per platform. PUT with a full body rather than
+ *       PATCH: the console's form owns every field, and a partial update on a
+ *       document whose most dangerous field is minSupportedVersion invites "the
+ *       field I omitted kept its old value".
+ *     security:
+ *       - AdminAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/AppReleasePolicy'
+ *     responses:
+ *       200:
+ *         description: The saved policy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/AppReleasePolicy'
+ *       400:
+ *         description: >
+ *           Malformed version, a non-https store URL, or — the one that matters —
+ *           a minSupportedVersion newer than latestVersion, which would block
+ *           every user including anyone already on the newest build.
+ *       401:
+ *         description: Unauthorized
+ */
+
 export {};
