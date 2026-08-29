@@ -113,6 +113,46 @@ accepted a password committed to this repository.
 means admin login rejects everything until the script is run.** Seed before or
 alongside the deploy, not after.
 
+## The mobile update gate can brick the field
+
+`models/AppRelease.ts` holds one document **per platform** telling the mobile app
+whether an update exists and whether it is mandatory. `GET /api/meta/app-update`
+is public and runs on every cold start and resume of every device.
+
+- **Absence means nothing is blocked.** There is deliberately no seed script and
+  no default for `minSupportedVersion` — every non-empty default is a default
+  that blocks somebody. A fresh deploy prompts nobody.
+- **Every branch that is not a confident "this build is out of date" returns no
+  update.** Unknown platform, unparseable version, no document, `enabled` not
+  exactly `true` — all 200, both flags false. An unusable version is *no
+  opinion*, never "very old": treating it as old would block every runtime that
+  cannot report its version, and updating does not fix a broken version read.
+- **The comparison lives here, not in the app.** Anything shipped into a binary
+  is frozen forever, including its bugs (non-negotiable #2). The app keeps only
+  two guards, both of which can *only* unblock: it ignores a required verdict
+  naming the version it is already running, and it ignores a response whose
+  echoed `receivedVersion` does not match what it sent.
+- **`utils/semver.ts` returns `null`, not `0`, for unparseable input.** `0` reads
+  as "equal", which is accidentally safe at today's call sites and inverts the
+  moment someone writes `cmp >= 0`. And `1.0.10` is newer than `1.0.9` — a
+  string compare gets that backwards, and the app ships 1.0.9.
+- **The single most valuable line** is the usecase refusing a
+  `minSupportedVersion` newer than `latestVersion`. That state blocks 100% of
+  users instantly, including anyone already on the newest build.
+
+**Recovery, when a bad policy has blocked the field.** Set `enabled: false` from
+the admin console's App Release page, or clear `minSupportedVersion`. Either
+reaches devices on their next launch *or resume* — the app forces a re-check on
+resume while blocked, so a rollback does not wait for a cold start. If the
+console itself is down:
+
+```
+db.appreleases.updateOne({ platform: 'android' }, { $set: { enabled: false } })
+```
+
+**Raise `latestVersion` only after the build is actually live on Play**, and
+never raise `minSupportedVersion` above a version the store can supply.
+
 ## Multi-tenancy is a security boundary
 
 ```typescript

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import * as adminUsecase from '../usecases/adminUsecase';
+import * as appReleaseUsecase from '../usecases/appReleaseUsecase';
 import logger from '../utils/logger';
 const log = logger.child('AdminController');
 
@@ -106,6 +107,43 @@ export const getHealth = (req: Request, res: Response, next: NextFunction): void
     res.json({ success: true, data: health });
   } catch (error) {
     log.error('Failed to get health info', { error: (error as Error).message });
+    next(error);
+  }
+};
+
+// @desc    Read the mobile release policy for a platform
+// @route   GET /api/admin/app-release?platform=android
+export const getAppRelease = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const platform = String(req.query.platform ?? 'android');
+    // `null` is a normal state — "no policy yet" — not a 404. The form has to
+    // be able to render and create from it.
+    const policy = await appReleaseUsecase.getReleasePolicy(platform);
+    res.json({ success: true, data: policy });
+  } catch (error) {
+    log.error('Admin read app-release failed', { adminEmail: req.admin?.email, error: (error as Error).message });
+    next(error);
+  }
+};
+
+// @desc    Save the mobile release policy for a platform
+// @route   PUT /api/admin/app-release
+export const updateAppRelease = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    log.warn('Admin app-release write request', { adminEmail: req.admin?.email, body: req.body });
+    const saved = await appReleaseUsecase.saveReleasePolicy({
+      platform: String(req.body.platform ?? 'android'),
+      latestVersion: String(req.body.latestVersion ?? ''),
+      minSupportedVersion: String(req.body.minSupportedVersion ?? ''),
+      storeUrl: String(req.body.storeUrl ?? ''),
+      updateMessage: String(req.body.updateMessage ?? ''),
+      blockingMessage: String(req.body.blockingMessage ?? ''),
+      enabled: req.body.enabled,
+      updatedBy: req.admin?.email ?? ''
+    });
+    res.json({ success: true, data: saved });
+  } catch (error) {
+    log.error('Admin app-release write failed', { adminEmail: req.admin?.email, error: (error as Error).message });
     next(error);
   }
 };
