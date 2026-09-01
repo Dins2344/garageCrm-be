@@ -9,6 +9,7 @@ import { COUNTRIES, DEFAULT_COUNTRY, isSupportedCountry } from '../config/countr
 import { isValidPhoneForCountry } from '../utils/phone';
 import { isValidTimezone } from '../utils/locale';
 import { sendPasswordResetEmail } from '../services/emailService';
+import { seedSampleData } from './sampleDataUsecase';
 
 const log = logger.child('AuthUsecase');
 
@@ -116,6 +117,20 @@ export const registerNewGarage = async (userData: RegisterInput): Promise<{ user
   }
 
   log.info('New garage and owner registered', { garageId: garage._id, userId: user._id });
+
+  // Deliberately NOT rolled back on failure, unlike the Garage.create above.
+  // That rollback protects an invariant — a User and Garage must both exist or
+  // neither does. This is a nicety: a signup that fails because a demo customer
+  // could not be written is far worse than an empty garage. The owner can seed
+  // nothing and still use the product.
+  try {
+    await seedSampleData({ garageId: garage._id, ownerId: user._id, country });
+  } catch (err) {
+    log.error('Sample data seeding failed', {
+      garageId: garage._id,
+      error: (err as Error).message
+    });
+  }
 
   const token = user.getSignedJwtToken();
   return { user, token };

@@ -15,6 +15,7 @@ export interface IVehicle extends Omit<Document, 'model'> {
   customer: Types.ObjectId;
   garage: Types.ObjectId;
   serviceHistory: Types.ObjectId[];
+  isSample: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -74,7 +75,12 @@ const vehicleSchema = new Schema<IVehicle>({
   serviceHistory: [{
     type: Schema.Types.ObjectId,
     ref: 'JobCard'
-  }]
+  }],
+  // See the note on Customer.isSample — display and cleanup only.
+  isSample: {
+    type: Boolean,
+    default: false
+  }
 }, {
   timestamps: true
 });

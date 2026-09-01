@@ -1300,6 +1300,39 @@
  *         description: Last remaining branch, or staff present with no staffAction given
  */
 
+/**
+ * @swagger
+ * /garage/sample-data:
+ *   delete:
+ *     tags: [Garage]
+ *     summary: Remove the demo rows seeded when the garage was created
+ *     description: >
+ *       A new garage is seeded at registration with a small demo dataset —
+ *       customers, vehicles, job cards and one paid invoice — so the app is not
+ *       empty on first open. Every seeded document carries `isSample: true`,
+ *       and this deletes exactly those, scoped to the caller's garage. Real
+ *       data is never touched, and calling it on a garage with no sample data
+ *       is a no-op returning zero counts.
+ *     responses:
+ *       200:
+ *         description: Sample data removed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     customers: { type: integer, example: 3 }
+ *                     vehicles: { type: integer, example: 4 }
+ *                     jobCards: { type: integer, example: 5 }
+ *                     invoices: { type: integer, example: 1 }
+ *       403:
+ *         description: Caller is not an owner or admin
+ */
+
 // ════════════════════════════════════════
 // META — REFERENCE DATA
 // ════════════════════════════════════════

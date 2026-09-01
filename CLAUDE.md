@@ -190,6 +190,38 @@ usecases.
   pins it; `scripts/repairCustomerVehicles.ts` recomputes the arrays for
   documents the bug already touched.
 
+## New garages are seeded, and `isSample` is not a security boundary
+
+`registerNewGarage` calls `seedSampleData`, which writes three customers, four
+vehicles, five job cards across five statuses and one paid invoice. It exists
+because a new account used to open on six empty screens — you had to invent a
+customer, a vehicle and a job card before the product did anything, and nobody
+evaluating the app does that.
+
+- **`isSample` is a display and cleanup flag only.** `garage` remains the sole
+  tenant boundary on every query. Never write `find({ isSample: false })` and
+  treat it as scoping.
+- **Seeding failure never fails registration.** The `try/catch` in
+  `registerNewGarage` is deliberate and is the opposite of the `User` rollback
+  directly above it: that one protects an invariant, this one protects a signup
+  from a nicety. `tests/sampleData.test.ts` pins it by making the seeder reject.
+- **Sample rows do not count against the free-plan daily quotas.** The plan
+  allows 3 job cards a day and the seeder writes 5, so counting them would lock
+  a new owner out of creating anything on their first day. Both `jobCardUsecase`
+  and `invoiceUsecase` exclude `isSample` from their `todayCount`.
+- **A delivered sample job card creates no service reminder.** Seed phone
+  numbers are derived from the country's placeholder format, so they are
+  plausible enough to belong to a real person, and a reminder is what the cron
+  later turns into a real SMS. `generateInvoiceFromJobCard` skips
+  `autoCreateFromDelivery` when `jobCard.isSample`.
+- **Nothing here is a currency amount.** Part prices are multiples of the
+  garage's own `laborRatePerHour`, and phone numbers derive from
+  `COUNTRIES[code].phoneExample` — see the header of `config/sampleData.ts` for
+  why that beats thirteen hand-written variants.
+- **`removeSampleData` deletes customers last**, because `hasSampleData` counts
+  sample customers. A partial failure therefore leaves the banner up to retry
+  rather than hiding it over a half-cleared garage.
+
 ## Locale and formatting
 
 - PDFs use `formatMoney(amount, locale, { display: 'code' })` — PDFKit's
