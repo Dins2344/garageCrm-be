@@ -90,8 +90,13 @@ export const openJobCard = async ({ jobCardData, garageId, userId }: OpenInput) 
   const startOfTomorrow = new Date(startOfToday);
   startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
 
+  // Sample rows never count against the quota. They are seeded by the system at
+  // registration, so counting them would spend a new owner's entire first-day
+  // allowance before they had created anything — the free plan allows 3 job
+  // cards a day and the seeder writes 5.
   const todayCount = await JobCard.countDocuments({
     garage: garageId,
+    isSample: { $ne: true },
     createdAt: { $gte: startOfToday, $lt: startOfTomorrow }
   });
   if (todayCount >= FREE_PLAN_LIMITS.maxJobCardsPerGaragePerDay) {
@@ -249,6 +254,51 @@ interface EstimationInput {
   };
 }
 
+/**
+ * The estimation tax formula — the source of truth.
+ *
+ * Both clients re-implement this as a live preview
+ * (`frontend/src/pages/JobCardDetail.tsx`, `mobile/src/screens/EstimationEditorScreen.tsx`)
+ * and must round to 2dp identically; `tests/taxParity.test.ts` pins that.
+ * Extracted as a pure function so anything server-side needing totals calls it
+ * rather than becoming a fourth copy — `sampleDataUsecase` is the first such
+ * caller.
+ *
+ * Note the deliberate asymmetry: `subtotal` is returned unrounded while
+ * `taxAmount` and `grandTotal` round to 2dp. That is the existing behaviour and
+ * what the clients mirror — do not "tidy" it into rounding all three.
+ */
+export const computeEstimationTotals = ({
+  parts = [],
+  labor = [],
+  discount = 0,
+  taxRate
+}: {
+  parts?: IEstimationPart[];
+  labor?: IEstimationLabor[];
+  discount?: number;
+  taxRate: number;
+}) => {
+  const calculatedParts = parts.map(p => ({ ...p, total: p.quantity * p.unitPrice }));
+  const calculatedLabor = labor.map(l => ({ ...l, total: l.hours * l.ratePerHour }));
+
+  const partsTotal = calculatedParts.reduce((sum, p) => sum + p.total, 0);
+  const laborTotal = calculatedLabor.reduce((sum, l) => sum + l.total, 0);
+  const subtotal = partsTotal + laborTotal;
+  const taxAmount = ((subtotal - discount) * taxRate) / 100;
+  const grandTotal = subtotal - discount + taxAmount;
+
+  return {
+    parts: calculatedParts,
+    labor: calculatedLabor,
+    subtotal,
+    taxRate,
+    taxAmount: Math.round(taxAmount * 100) / 100,
+    discount,
+    grandTotal: Math.round(grandTotal * 100) / 100
+  };
+};
+
 export const calculateAndSaveEstimation = async ({ jobCardId, garageId, estimationData }: EstimationInput) => {
   const jobCard = await JobCard.findOne({ _id: jobCardId, garage: garageId });
 
@@ -256,30 +306,21 @@ export const calculateAndSaveEstimation = async ({ jobCardId, garageId, estimati
     throw new HttpError('Job card not found', 404);
   }
 
-  const { parts = [], labor = [], discount = 0, taxRate } = estimationData;
+  const { parts, labor, discount = 0, taxRate } = estimationData;
 
-  const calculatedParts = parts.map(p => ({ ...p, total: p.quantity * p.unitPrice }));
-  const calculatedLabor = labor.map(l => ({ ...l, total: l.hours * l.ratePerHour }));
-
-  const partsTotal = calculatedParts.reduce((sum, p) => sum + p.total, 0);
-  const laborTotal = calculatedLabor.reduce((sum, l) => sum + l.total, 0);
-  const subtotal = partsTotal + laborTotal;
-  const actualTaxRate = taxRate !== undefined ? taxRate : jobCard.estimation.taxRate;
-  const taxAmount = ((subtotal - discount) * actualTaxRate) / 100;
-  const grandTotal = subtotal - discount + taxAmount;
+  const totals = computeEstimationTotals({
+    parts,
+    labor,
+    discount,
+    taxRate: taxRate !== undefined ? taxRate : jobCard.estimation.taxRate
+  });
 
   if (jobCard.invoice) {
     throw new HttpError('Cannot edit estimation after invoice generation. Please reopen the job card first.', 400);
   }
 
   jobCard.estimation = {
-    parts: calculatedParts,
-    labor: calculatedLabor,
-    subtotal,
-    taxRate: actualTaxRate,
-    taxAmount: Math.round(taxAmount * 100) / 100,
-    discount,
-    grandTotal: Math.round(grandTotal * 100) / 100,
+    ...totals,
     approvedByCustomer: jobCard.estimation.approvedByCustomer,
     approvedAt: jobCard.estimation.approvedAt,
     sentAt: jobCard.estimation.sentAt

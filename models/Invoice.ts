@@ -22,6 +22,7 @@ export interface IInvoice extends Document {
   paidAt: Date | null;
   notes: string;
   createdBy: Types.ObjectId;
+  isSample: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -110,6 +111,11 @@ const invoiceSchema = new Schema<IInvoice>({
     type: Schema.Types.ObjectId,
     ref: 'User',
     required: true
+  },
+  // See the note on Customer.isSample — display and cleanup only.
+  isSample: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true

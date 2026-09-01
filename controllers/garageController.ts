@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import * as garageUsecase from '../usecases/garageUsecase';
+import * as sampleDataUsecase from '../usecases/sampleDataUsecase';
 import { resolveGarageLocale } from '../utils/locale';
 import type { IGarage } from '../models/Garage';
 import logger from '../utils/logger';
@@ -21,8 +22,15 @@ export const getGarage = async (req: Request, res: Response, next: NextFunction)
     const garageId = req.garageId!;
     log.info('Fetching garage info', { garageId });
     const garage = await garageUsecase.getGarageById({ garageId });
+    // Answered here rather than on the dashboard so it reaches every screen:
+    // both clients hold the garage in context, and Settings needs the same flag
+    // as Home without paying for a dashboard request to get it.
+    const sampleDataPresent = await sampleDataUsecase.hasSampleData(garageId);
     log.info('Garage info fetched', { garageId, name: garage.name });
-    res.status(200).json({ success: true, data: withLocale(garage) });
+    res.status(200).json({
+      success: true,
+      data: { ...withLocale(garage), hasSampleData: sampleDataPresent }
+    });
   } catch (error) {
     log.error('Failed to fetch garage', { garageId: req.garageId, error: (error as Error).message });
     next(error);
@@ -106,6 +114,23 @@ export const deleteBranch = async (req: Request, res: Response, next: NextFuncti
     res.status(200).json({ success: true, data: result });
   } catch (error) {
     log.error('Failed to delete branch', { ownerId: req.user?._id, garageId: req.params.id, error: (error as Error).message });
+    next(error);
+  }
+};
+
+// @desc    Remove every seeded sample row from the active garage
+// @route   DELETE /api/garage/sample-data
+export const removeSampleData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const garageId = req.garageId!;
+    // warn, not info: this permanently deletes documents, so it belongs in the
+    // audit trail beside the other delete endpoints.
+    log.warn('Remove sample data requested', { garageId, userId: req.user?._id });
+    const removed = await sampleDataUsecase.removeSampleData({ garageId });
+    log.warn('Sample data removed', { garageId, ...removed });
+    res.status(200).json({ success: true, data: removed });
+  } catch (error) {
+    log.error('Failed to remove sample data', { garageId: req.garageId, error: (error as Error).message });
     next(error);
   }
 };

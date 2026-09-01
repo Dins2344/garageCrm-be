@@ -18,6 +18,7 @@ export interface ICustomer extends Document {
   totalVisits: number;
   totalSpent: number;
   notes: string;
+  isSample: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -62,6 +63,13 @@ const customerSchema = new Schema<ICustomer>({
   notes: {
     type: String,
     default: ''
+  },
+  // Seeded demo row, created with the garage so a brand-new account is not an
+  // empty app. A display and cleanup flag only — never an access-control one;
+  // `garage` is still the sole tenant boundary on every query.
+  isSample: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true

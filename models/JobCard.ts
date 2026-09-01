@@ -69,6 +69,7 @@ export interface IJobCard extends Document {
   invoice: Types.ObjectId | null;
   createdBy: Types.ObjectId;
   estimationToken: string | null;
+  isSample: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -197,6 +198,11 @@ const jobCardSchema = new Schema<IJobCard>({
   estimationToken: {
     type: String,
     default: null
+  },
+  // See the note on Customer.isSample — display and cleanup only.
+  isSample: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true
