@@ -224,11 +224,15 @@ on every object, and a published mobile build cannot be forced to upgrade, so:
 - **`db` is bound at boot, not buffered.** Mongoose queued queries until a
   connection appeared; `config/db.ts` throws if `connectDB()` (or the test
   harness's `setDb()`) has not run. `server.ts` awaits it before `listen()`.
-- **Document numbers are issued under a lock.** `utils/numbering.ts` takes
-  `SELECT ... FOR UPDATE` on the garage row inside the caller's transaction,
-  then counts — same `JC-YYMMDD-0001` format, no longer racy. It must be
-  called inside `db.transaction()`. PGlite serialises transactions, so the
-  lock is only genuinely exercised against Neon.
+- **Document numbers continue from the highest issued, under a lock.**
+  `utils/numbering.ts` takes `SELECT ... FOR UPDATE` on the garage row inside
+  the caller's transaction, then reads `max(NNNN)` — same `JC-YYMMDD-0001`
+  format. Never go back to `count + 1`: once anything is deleted the count
+  falls below the highest number and the next one collides. Mongo issued
+  that duplicate silently (no unique index on invoices); Postgres refused it
+  on the first invoice after cutover. It must be called inside
+  `db.transaction()`. PGlite serialises transactions, so the lock is only
+  genuinely exercised against Neon.
 - **`double precision`, not `numeric`.** Mongoose stored JS doubles; `numeric`
   would come back as strings and change the tax parity both clients mirror.
 - **Neon's free tier scales compute to zero after a few idle minutes.** The
