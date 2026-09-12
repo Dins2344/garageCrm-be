@@ -82,31 +82,32 @@ import logger from '../utils/logger';
 The whole backend is TypeScript (`strict: true` in `tsconfig.json`). No new `.js` files — everything is `.ts`.
 
 ### Rules
-- **Colocate types with their model.** A model's `Document`-extending interface (`IUser`, `ICustomer`, ...) lives in the same file as its schema, not in `types/`.
+- **Colocate types with their model.** A model's row type (`UserRow`, `CustomerRow`, ...) and its zod schemas live in `models/<X>.ts`, not in `types/`; JSONB payload shapes (`Estimation`, `Address`, ...) live next to their column in `config/schema.ts` and are re-exported by the model.
 - **Shared domain enums live in `types/domain.ts`.** `Role`, `JobStatus`, `ServiceType`, `PaymentStatus`, etc. are each a `const array + derived union type` (see the file for the pattern) — reuse them instead of re-typing string literals in a new usecase/model. These must stay in sync with the enum lists in `.claude/rules/00-shared-contract.md` and with both client repos' `types/models.ts`.
 - **`req.user` / `req.admin` typing** lives in `types/express.d.ts`, which augments `Express.Request` globally. Don't redeclare `req.user`'s shape locally — import `AuthenticatedUser` from `types/express` if you need to reference the type directly.
 - **Errors:** throw `HttpError` from `utils/httpError.ts` (see Error Handling above) instead of a plain `Error` with a bolted-on `.statusCode`.
 - **Avoid `any`.** It's acceptable at genuine third-party boundaries where a library's types don't line up with reality (a couple of PDF/email service spots do this deliberately, with a comment) — it is not acceptable as a shortcut past a real typing problem in our own code.
 - **`req.params.<name>` is `string | string[]`** under Express 5's types (path-to-regexp supports repeating params now). Cast explicitly: `const id = req.params.id as string;`.
-- Mongoose query filter type is `QueryFilter<T>` in this Mongoose version (**not** `FilterQuery<T>` — that name was renamed upstream; don't reintroduce the old import).
+- Row types come from the table: `typeof customers.$inferSelect` (exported as `CustomerRow` from the model). Usecases return `ApiObject` (from `utils/serialize.ts`) — the serialised shape — never a raw row.
+- The database handle is `db` from `config/db.ts`; a helper that must run inside a caller's transaction takes `DbOrTx`.
 - Run `npm run typecheck` (`tsc --noEmit`) before pushing — it's also enforced in CI (`.github/workflows/ci.yml`).
 
 ---
 
 ## Testing Conventions
 
-Tests use **Vitest** + **Supertest** + **mongodb-memory-server** — a real (ephemeral, local, free) MongoDB instance per test run, not mocks of Mongoose itself. This means tests exercise the actual `garage`-scoping queries, schema validators, and indexes, not a fake approximation of them.
+Tests use **Vitest** + **Supertest** + **@electric-sql/pglite** — a real, in-process Postgres per test file, running the same `drizzle/` migrations production applies, not mocks of the query layer. This means tests exercise the actual `garage`-scoping queries, constraints, foreign keys and unique indexes, not a fake approximation of them. (One limit: PGlite is single-connection, so it cannot exercise a genuine concurrent-transaction race.)
 
 ### Where tests live
 - `tests/*.test.ts` — one file per feature area, not necessarily one per usecase (e.g. `tests/jobCardAndInvoice.test.ts` covers both since invoice generation depends on job card estimation state)
-- `tests/setup.ts` — global setup: starts `mongodb-memory-server`, connects Mongoose, clears all collections after every test, and mocks `services/emailService.ts` + `services/smsService.ts` so no test ever contacts a real SMTP/Twilio provider
-- `tests/helpers/` — shared fixtures (e.g. `factories.ts` for registering a garage + owner through the real `/api/auth/register` endpoint)
+- `tests/setup.ts` — global setup: starts PGlite, applies the migrations, binds it with `setDb()`, truncates every table after every test, and mocks `services/emailService.ts` + `services/smsService.ts` so no test ever contacts a real SMTP/Twilio provider
+- `tests/helpers/` — shared fixtures (`factories.ts` for registering a garage + owner through the real `/api/auth/register` endpoint; `dbAccess.ts` for the direct `findById` / `countInGarage` reads a test occasionally needs)
 
 ### Rules
 - **Hit real routes through `app` (from `app.ts`), not `server.ts`.** `import app from '../app'; import request from 'supertest';` — never import `server.ts` in a test, it calls `app.listen()` and starts the cron scheduler.
 - **Tenant-isolation tests are mandatory** for any new tenant-scoped entity: prove that Garage B gets a 404 (not the data) when trying to read/update/delete a resource that belongs to Garage A. See `tests/tenantIsolation.test.ts` for the pattern.
 - **Every new/changed usecase should ship with at least one happy-path and one error-path test.** Not full line-coverage — the priority order is auth, tenant isolation, and billing/invoice math, since those are the areas where a silent bug is expensive.
-- Fixture setup shared across multiple `it()` blocks in the same `describe` must use `beforeEach`, not `beforeAll` — the global `afterEach` in `tests/setup.ts` wipes all collections after every single test, so a `beforeAll` fixture only survives the first test in the block.
+- Fixture setup shared across multiple `it()` blocks in the same `describe` must use `beforeEach`, not `beforeAll` — the global `afterEach` in `tests/setup.ts` truncates every table after every single test, so a `beforeAll` fixture only survives the first test in the block.
 - Use unique emails/phone numbers per test (see `nextPhone()` in `tests/helpers/factories.ts`) rather than relying on cleanup ordering.
 - Test emails need a real-looking TLD 2-3 characters long (`@example.com`, not `@test.local`) — the `User` model's email regex requires it; this is a real constraint on registered users, not a test-only quirk.
 
@@ -124,7 +125,7 @@ All environment variables MUST be documented in `.env.production.example`:
 # Required
 NODE_ENV=production
 PORT=5000
-MONGODB_URI=mongodb+srv://...
+DATABASE_URL=postgresql://...?sslmode=require
 JWT_SECRET=your_jwt_secret
 CLIENT_URL=https://yourdomain.com
 
@@ -155,7 +156,7 @@ Before pushing code, verify:
 - [ ] All routes are wrapped in `asyncHandler()`
 - [ ] All queries are scoped to `garageId` (unless admin)
 - [ ] Error handling follows the `throw new HttpError(message, statusCode)` pattern
-- [ ] New models include `timestamps: true` and `garage` field, and export their `Document` interface
+- [ ] New tables spread `...timestamps`, carry `garageId` with a cascade foreign key, and have a committed migration in `drizzle/`
 - [ ] New routes are registered in `app.ts`
 - [ ] New/changed endpoints are documented in `config/swaggerDocs.ts`, and changed models/request shapes updated in `config/swagger.ts` — verify with `npx tsx scripts/checkSwagger.ts`
 - [ ] Logging includes structured metadata (not string interpolation)

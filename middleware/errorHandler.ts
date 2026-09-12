@@ -1,15 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import logger from '../utils/logger';
+import { pgError, isUniqueViolation, isForeignKeyViolation, uniqueViolationField } from '../utils/dbErrors';
 
 const log = logger.child('ErrorHandler');
 
 interface AppError extends Error {
   statusCode?: number;
-  code?: number;
-  keyValue?: Record<string, unknown>;
-  errors?: Record<string, { message: string }>;
-  path?: string;
-  value?: unknown;
 }
 
 const errorHandler = (err: AppError, req: Request, res: Response, _next: NextFunction): void => {
@@ -24,29 +20,28 @@ const errorHandler = (err: AppError, req: Request, res: Response, _next: NextFun
     stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 
-  // Mongoose bad ObjectId
-  if (err.name === 'CastError') {
-    message = 'Resource not found';
-    log.warn('Invalid ObjectId provided', { path: err.path, value: err.value });
-    res.status(404).json({ success: false, message });
-    return;
-  }
-
-  // Mongoose duplicate key
-  if (err.code === 11000) {
-    const field = Object.keys(err.keyValue || {})[0];
+  // Unique index violation — same wording the clients have always shown.
+  if (isUniqueViolation(err)) {
+    const field = uniqueViolationField(err);
     message = `Duplicate value entered for '${field}'. This value already exists.`;
-    log.warn('Duplicate key violation', { field, value: err.keyValue?.[field] });
+    log.warn('Duplicate key violation', { field, constraint: pgError(err)?.constraint });
     res.status(400).json({ success: false, message });
     return;
   }
 
-  // Mongoose validation error
-  if (err.name === 'ValidationError' && err.errors) {
-    const messages = Object.values(err.errors).map(val => val.message);
-    message = messages.join('. ');
-    log.warn('Validation error', { fields: Object.keys(err.errors), messages });
-    res.status(400).json({ success: false, message });
+  // A foreign key stopped a delete (dependent rows exist) or an insert named a
+  // parent that does not exist. Usecases normally catch this first with a
+  // specific message; this is the backstop.
+  if (isForeignKeyViolation(err)) {
+    message = 'This record is referenced by other records and cannot be changed.';
+    log.warn('Foreign key violation', { constraint: pgError(err)?.constraint });
+    res.status(409).json({ success: false, message });
+    return;
+  }
+
+  // Any other database error must never leak its SQL to a client.
+  if (pgError(err) && !err.statusCode) {
+    res.status(500).json({ success: false, message: 'Server Error' });
     return;
   }
 

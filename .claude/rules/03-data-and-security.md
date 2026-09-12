@@ -50,18 +50,24 @@ log.error('Failed to create customer', { garageId: req.user?.garage?._id, error:
 
 **Every data query MUST be scoped to a garage.**
 
-```javascript
+```typescript
 // Always filter by garage
-const customer = await Customer.findOne({ _id: customerId, garage: garageId });
+const customer = await db.query.customers.findFirst({
+  where: and(eq(customers._id, customerId), eq(customers.garageId, garageId))
+});
 
 // Never query without garage scope (data leak!)
-const customer = await Customer.findById(customerId);
+const customer = await db.query.customers.findFirst({ where: eq(customers._id, customerId) });
 ```
 
 ### Rules:
-- `garageId` comes from `req.user.garage._id` (set by the `protect` middleware)
-- All models that hold tenant data must have a `garage` field (ObjectId, required)
-- Always add a compound index: `schema.index({ garage: 1, <field>: 1 })`
+- `garageId` comes from `req.garageId` (set by the `protect` middleware)
+- All tables that hold tenant data must have a `garageId` column, NOT NULL,
+  `references(() => garages._id, { onDelete: 'cascade' })`
+- Always add a compound index: `index('<table>_garage_<field>_idx').on(t.garageId, t.<field>)`
+- A foreign key proves a referenced row exists, not whose it is — check that a
+  `customerId` / `vehicleId` from the request belongs to the caller's garage
+  before inserting a row that points at it
 - The ONLY exception is the `admin` routes which operate cross-garage
 
 ---
@@ -70,8 +76,8 @@ const customer = await Customer.findById(customerId);
 
 - [ ] All routes use `protect` middleware unless intentionally public
 - [ ] Role-based access uses `authorize(...)` with the minimum required roles
-- [ ] User input is never trusted — Mongoose validators + `express-validator` where needed
-- [ ] `mongoSanitize` middleware prevents NoSQL injection
+- [ ] User input is never trusted — every create/update runs its zod schema through `runSchema()`
+- [ ] Every query is parameterised through Drizzle; a raw `sql` fragment never interpolates user input
 - [ ] `helmet()` sets security headers
 - [ ] `hpp()` prevents HTTP parameter pollution
 - [ ] Rate limiting is applied on all `/api` routes
@@ -84,49 +90,41 @@ const customer = await Customer.findById(customerId);
 ## Model / Schema Rules
 
 ```typescript
-import mongoose, { Document, Schema, Types } from 'mongoose';
+// config/schema.ts — the table
+export const examples = pgTable('examples', {
+  _id: idColumn(),                                   // 24-hex ObjectId, text
+  name: text().notNull(),
+  garageId: text().notNull().references(() => garages._id, { onDelete: 'cascade' }),
+  ...timestamps                                      // createdAt / updatedAt, touched on update
+}, (t) => [
+  index('examples_garage_name_idx').on(t.garageId, t.name)
+]);
 
-export interface IExample extends Document {
-  _id: Types.ObjectId;
-  name: string;
-  garage: Types.ObjectId;
-  createdAt: Date;
-  updatedAt: Date;
-}
+// models/Example.ts — validation and serialisation
+export { examples };
+export type ExampleRow = typeof examples.$inferSelect;
 
-const exampleSchema = new Schema<IExample>({
-  name: {
-    type: String,
-    required: [true, 'Name is required'],  // Always include error messages
-    trim: true
-  },
-  garage: {
-    type: Schema.Types.ObjectId,
-    ref: 'Garage',
-    required: true                          // Always required for tenant data
-  }
-}, {
-  timestamps: true                          // Always enable timestamps
+export const createExampleSchema = z.object({
+  name: requiredString('Name is required')            // Always include error messages
+});
+export const updateExampleSchema = z.object({
+  name: requiredString('Name is required').optional()  // written out, never `.partial()`
 });
 
-// Always add relevant indexes
-exampleSchema.index({ garage: 1, name: 1 });
-
-export default mongoose.model<IExample>('Example', exampleSchema);
+export const exampleToApi = (row: object): ApiObject => serializeRow(row);
 ```
 
 ### Rules:
-- Always use `{ timestamps: true }` on schemas
-- Always add the `garage` field for tenant-scoped models
-- Always include `required: [true, 'Descriptive message']` for mandatory fields
-- Use `trim: true` on string fields
-- Use `default: ''` for optional string fields (not `null`)
-- Use `default: 0` for optional number fields
-- Define compound indexes for frequently queried field combinations
-- Model file name = PascalCase singular (`Customer.ts`, not `customers.ts`)
-- Export a `Document`-extending interface (`IExample`) from the same file as the schema — don't put it in a separate types file
-- If a domain field name collides with a Mongoose `Document` method (e.g. a vehicle's `model` field vs. `Document.model()`), extend `Omit<Document, 'thatField'>` instead of `Document` directly (see `models/Vehicle.ts`)
-- Enum-like string fields (`enum: [...]`) should pull their allowed values from `types/domain.ts` (see below), not repeat the list inline
+- Columns, indexes and foreign keys live in `config/schema.ts`; everything else about the entity in `models/<X>.ts`
+- Always spread `...timestamps` and always add `garageId` for tenant-scoped tables
+- Primary keys are `idColumn()` — never an integer or UUID on anything a client sees; both clients read `_id`
+- `text().notNull().default('')` for optional strings (not null); `doublePrecision().notNull().default(0)` for numbers
+- Enum-like string columns are plain `text`; the allowed values come from `types/domain.ts` and are enforced by the zod schema, so adding a value never needs a migration
+- Nested objects and arrays that are never queried by content are `jsonb().$type<Shape>()` with the shape declared in `config/schema.ts`
+- Reference columns are `<name>Id`; the relation is `<name>`; `serializeRow` collapses the pair to the single `<name>` key the API has always had
+- Update schemas are written out without `.default()` — see the JSONB-merge note in `CLAUDE.md`
+- Model file name = PascalCase singular (`Customer.ts`), table export = camelCase plural (`customers`)
+- After any change to `config/schema.ts`: `npx drizzle-kit generate --name <what-changed>` and commit the SQL
 
 ---
 

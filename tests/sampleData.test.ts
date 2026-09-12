@@ -1,10 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import request from 'supertest';
 import app from '../app';
-import Customer from '../models/Customer';
-import Vehicle from '../models/Vehicle';
-import JobCard from '../models/JobCard';
-import Invoice from '../models/Invoice';
+import { asc, eq } from 'drizzle-orm';
+import { db, schema, countInGarage, findById } from './helpers/dbAccess';
 import {
   SAMPLE_CUSTOMERS, SAMPLE_JOB_CARDS, SAMPLE_VEHICLES,
   sampleCustomerName, samplePhone, samplePlate
@@ -23,10 +21,10 @@ describe('sample data seeding', () => {
     const { garageId } = await createGarageWithOwner('seed');
 
     const [customers, vehicles, jobCards, invoices] = await Promise.all([
-      Customer.countDocuments({ garage: garageId }),
-      Vehicle.countDocuments({ garage: garageId }),
-      JobCard.countDocuments({ garage: garageId }),
-      Invoice.countDocuments({ garage: garageId })
+      countInGarage(schema.customers, garageId),
+      countInGarage(schema.vehicles, garageId),
+      countInGarage(schema.jobCards, garageId),
+      countInGarage(schema.invoices, garageId)
     ]);
 
     expect(customers).toBe(SAMPLE_CUSTOMERS.length);
@@ -39,19 +37,23 @@ describe('sample data seeding', () => {
     const { garageId } = await createGarageWithOwner('flagged');
 
     const unflagged = await Promise.all([
-      Customer.countDocuments({ garage: garageId, isSample: { $ne: true } }),
-      Vehicle.countDocuments({ garage: garageId, isSample: { $ne: true } }),
-      JobCard.countDocuments({ garage: garageId, isSample: { $ne: true } }),
-      Invoice.countDocuments({ garage: garageId, isSample: { $ne: true } })
+      countInGarage(schema.customers, garageId, eq(schema.customers.isSample, false)),
+      countInGarage(schema.vehicles, garageId, eq(schema.vehicles.isSample, false)),
+      countInGarage(schema.jobCards, garageId, eq(schema.jobCards.isSample, false)),
+      countInGarage(schema.invoices, garageId, eq(schema.invoices.isSample, false))
     ]);
 
     expect(unflagged).toEqual([0, 0, 0, 0]);
   });
 
-  it('maintains the denormalised Customer.vehicles count', async () => {
+  it('gives one customer two vehicles so the vehicle count column has something to show', async () => {
     const { garageId } = await createGarageWithOwner('counts');
 
-    const customers = await Customer.find({ garage: garageId }).sort({ createdAt: 1 }).lean();
+    const customers = await db.query.customers.findMany({
+      where: eq(schema.customers.garageId, garageId),
+      orderBy: [asc(schema.customers.createdAt), asc(schema.customers._id)],
+      with: { vehicles: { columns: { _id: true } } }
+    });
     const counts = customers.map(c => c.vehicles.length);
 
     // Customer 0 owns two vehicles on purpose — it is the only way the vehicle
@@ -62,7 +64,7 @@ describe('sample data seeding', () => {
   it('spreads job cards across statuses rather than leaving them all new', async () => {
     const { garageId } = await createGarageWithOwner('statuses');
 
-    const jobCards = await JobCard.find({ garage: garageId }).lean();
+    const jobCards = await db.query.jobCards.findMany({ where: eq(schema.jobCards.garageId, garageId) });
     const statuses = new Set(jobCards.map(j => j.status));
 
     expect(statuses.size).toBeGreaterThanOrEqual(4);
@@ -72,12 +74,12 @@ describe('sample data seeding', () => {
   it('raises the invoice against the delivered card with totals from the shared calculator', async () => {
     const { garageId } = await createGarageWithOwner('invoice');
 
-    const invoice = await Invoice.findOne({ garage: garageId }).lean();
-    expect(invoice).not.toBeNull();
+    const invoice = await db.query.invoices.findFirst({ where: eq(schema.invoices.garageId, garageId) });
+    expect(invoice).toBeDefined();
 
-    const jobCard = await JobCard.findById(invoice!.jobCard).lean();
+    const jobCard = await findById(schema.jobCards, invoice!.jobCardId);
     expect(jobCard!.status).toBe('delivered');
-    expect(jobCard!.invoice?.toString()).toBe(invoice!._id.toString());
+    expect(jobCard!.invoiceId).toBe(invoice!._id);
 
     // Recomputing through the same function the estimation editor uses is the
     // point: if the seeder ever grows its own copy of the tax maths, this fails.
@@ -95,7 +97,7 @@ describe('sample data seeding', () => {
   it('gives each sample customer a distinct phone number', async () => {
     const { garageId } = await createGarageWithOwner('phones');
 
-    const customers = await Customer.find({ garage: garageId }).lean();
+    const customers = await db.query.customers.findMany({ where: eq(schema.customers.garageId, garageId) });
     const phones = customers.map(c => c.phone);
 
     expect(new Set(phones).size).toBe(phones.length);
@@ -146,11 +148,11 @@ describe('DELETE /api/garage/sample-data', () => {
   it('removes every seeded row and leaves real data standing', async () => {
     const { token, garageId } = await createGarageWithOwner('remove');
 
-    const realCustomer = await Customer.create({
+    const [realCustomer] = await db.insert(schema.customers).values({
       name: 'Genuine Customer',
       phone: '9111111111',
-      garage: garageId
-    });
+      garageId
+    }).returning();
 
     const res = await request(app)
       .delete('/api/garage/sample-data')
@@ -164,14 +166,14 @@ describe('DELETE /api/garage/sample-data', () => {
       invoices: 1
     });
 
-    const remaining = await Customer.find({ garage: garageId }).lean();
+    const remaining = await db.query.customers.findMany({ where: eq(schema.customers.garageId, garageId) });
     expect(remaining).toHaveLength(1);
-    expect(remaining[0]._id.toString()).toBe(realCustomer._id.toString());
+    expect(remaining[0]._id).toBe(realCustomer._id);
 
     const [vehicles, jobCards, invoices] = await Promise.all([
-      Vehicle.countDocuments({ garage: garageId }),
-      JobCard.countDocuments({ garage: garageId }),
-      Invoice.countDocuments({ garage: garageId })
+      countInGarage(schema.vehicles, garageId),
+      countInGarage(schema.jobCards, garageId),
+      countInGarage(schema.invoices, garageId)
     ]);
     expect([vehicles, jobCards, invoices]).toEqual([0, 0, 0]);
   });
@@ -194,7 +196,7 @@ describe('DELETE /api/garage/sample-data', () => {
 
     // B is untouched — the delete is scoped by the caller's garage, and there is
     // no id in the request for a caller to tamper with in the first place.
-    const bCustomers = await Customer.countDocuments({ garage: b.garageId });
+    const bCustomers = await countInGarage(schema.customers, b.garageId);
     expect(bCustomers).toBe(SAMPLE_CUSTOMERS.length);
   });
 

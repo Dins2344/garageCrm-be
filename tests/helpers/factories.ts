@@ -1,6 +1,8 @@
 import request from 'supertest';
 import app from '../../app';
-import Admin from '../../models/Admin';
+import { db } from '../../config/db';
+import { admins } from '../../models/Admin';
+import { hashPassword } from '../../utils/password';
 
 let phoneCounter = 0;
 /** Deterministic, valid-looking 10-digit Indian phone number, unique per call. */
@@ -66,14 +68,15 @@ export async function addGarageToOwner(token: string, name: string) {
 export const ADMIN_EMAIL = 'platform-admin@example.com';
 export const ADMIN_PASSWORD = 'test-admin-password-12chars';
 
-/** Seeds an active super-admin. Password is hashed by the model's save hook. */
+/** Seeds an active super-admin, hashing the password the way the script does. */
 export async function createSuperAdmin(overrides: Partial<{ email: string; name: string; password: string; isActive: boolean }> = {}) {
-  return Admin.create({
+  const [admin] = await db.insert(admins).values({
     email: overrides.email ?? ADMIN_EMAIL,
     name: overrides.name ?? 'Platform Admin',
-    password: overrides.password ?? ADMIN_PASSWORD,
+    password: await hashPassword(overrides.password ?? ADMIN_PASSWORD),
     isActive: overrides.isActive ?? true
-  });
+  }).returning();
+  return admin;
 }
 
 /** Seeds an admin and returns a valid bearer token for it. */

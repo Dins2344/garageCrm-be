@@ -1,12 +1,9 @@
-import { Types } from 'mongoose';
-import Garage, { IGarage } from '../models/Garage';
-import User from '../models/User';
-import Customer from '../models/Customer';
-import Vehicle from '../models/Vehicle';
-import JobCard from '../models/JobCard';
-import Invoice from '../models/Invoice';
-import Inventory from '../models/Inventory';
-import ServiceReminder from '../models/ServiceReminder';
+import { and, asc, count, eq, ne, sql } from 'drizzle-orm';
+import { db } from '../config/db';
+import { garages, GarageRow, createGarageSchema, updateGarageSchema, garageToApi } from '../models/Garage';
+import { users, USER_PUBLIC_COLUMNS, userToApi } from '../models/User';
+import { runSchema } from '../utils/validation';
+import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { FREE_PLAN_LIMITS } from '../config/planLimits';
@@ -16,74 +13,49 @@ import { isValidTimezone } from '../utils/locale';
 const log = logger.child('GarageUsecase');
 
 interface GetByIdInput {
-  garageId: Types.ObjectId | string;
+  garageId: string;
 }
 
 /**
  * Get garage by ID
  */
-export const getGarageById = async ({ garageId }: GetByIdInput) => {
-  const garage = await Garage.findById(garageId);
+export const getGarageById = async ({ garageId }: GetByIdInput): Promise<ApiObject> => {
+  const garage = await db.query.garages.findFirst({ where: eq(garages._id, garageId) });
   if (!garage) {
     throw new HttpError('Garage not found', 404);
   }
-  return garage;
+  return garageToApi(garage);
 };
 
-const ALLOWED_FIELDS = ['name', 'phone', 'email', 'gstNumber', 'address', 'settings', 'country'] as const;
-
-// Sub-documents that must be merged key-by-key. `$set: { settings: {...} }`
-// REPLACES the whole sub-document, so a caller sending only `{ taxRate }`
-// silently wipes currency/laborRatePerHour/serviceReminderDays. Flattening to
-// dotted paths (`settings.taxRate`) makes the update a merge instead.
-const NESTED_FIELDS: readonly string[] = ['address', 'settings'];
+/**
+ * The two columns `resolveGarageLocale` reads, for the auth responses. Null
+ * rather than 404 when missing — the locale resolver falls back to the
+ * default country, which is what the auth payload wants.
+ */
+export const findGarageLocaleSource = async ({ garageId }: GetByIdInput): Promise<Pick<GarageRow, 'country' | 'settings'> | null> => {
+  const garage = await db.query.garages.findFirst({
+    columns: { country: true, settings: true },
+    where: eq(garages._id, garageId)
+  });
+  return garage ?? null;
+};
 
 interface UpdateInput {
-  garageId: Types.ObjectId | string;
-  updateData: Partial<IGarage>;
+  garageId: string;
+  updateData: Record<string, unknown>;
 }
 
 /**
- * Build a `$set` payload from the whitelisted fields, flattening nested
- * objects to dotted paths so partial updates merge rather than replace.
+ * Update garage info — only allows safe, pre-defined fields.
+ *
+ * `address` and `settings` are JSONB and are merged key by key (`||`) rather
+ * than replaced, so a caller sending only `{ settings: { taxRate } }` never
+ * wipes currency/laborRatePerHour/serviceReminderDays. This used to need a
+ * dotted-path `$set` workaround; the merge operator is the native form.
  */
-const buildSetPayload = (updateData: Partial<IGarage>): Record<string, unknown> => {
-  const $set: Record<string, unknown> = {};
-
-  ALLOWED_FIELDS.forEach(field => {
-    const value = updateData[field];
-    if (value === undefined) return;
-
-    const isMergeableObject =
-      NESTED_FIELDS.includes(field) &&
-      value !== null &&
-      typeof value === 'object' &&
-      !Array.isArray(value);
-
-    if (!isMergeableObject) {
-      $set[field] = value;
-      return;
-    }
-
-    Object.entries(value as unknown as Record<string, unknown>).forEach(([key, nestedValue]) => {
-      if (nestedValue === undefined) return;
-      // Never let caller-supplied keys build an operator or traverse deeper
-      // than one level (mongoSanitize also strips `$`, but this is cheap).
-      if (key.startsWith('$') || key.includes('.')) return;
-      $set[`${field}.${key}`] = nestedValue;
-    });
-  });
-
-  return $set;
-};
-
-/**
- * Update garage info — only allows safe, pre-defined fields
- */
-export const updateGarageInfo = async ({ garageId, updateData }: UpdateInput) => {
-  // Validate the country here rather than leaning on the schema enum: with
-  // `runValidators` a bad code surfaces as a Mongoose ValidationError, and a
-  // typo'd country deserves a clear 400.
+export const updateGarageInfo = async ({ garageId, updateData }: UpdateInput): Promise<ApiObject> => {
+  // Validate the country here rather than leaning on a schema enum: a typo'd
+  // country deserves a clear 400 with the offending value in it.
   if (updateData.country !== undefined) {
     const requested = String(updateData.country).toUpperCase();
     if (!isSupportedCountry(requested)) {
@@ -92,13 +64,13 @@ export const updateGarageInfo = async ({ garageId, updateData }: UpdateInput) =>
     updateData = { ...updateData, country: requested };
   }
 
-  const requestedTimezone = updateData.settings?.timezone;
+  const changes = runSchema(updateGarageSchema, updateData);
+
+  const requestedTimezone = changes.settings?.timezone;
   // '' is meaningful — it clears the override so the country table applies.
   if (requestedTimezone && !isValidTimezone(requestedTimezone)) {
     throw new HttpError(`Unrecognised timezone: ${requestedTimezone}`, 400);
   }
-
-  const $set = buildSetPayload(updateData);
 
   // Changing country deliberately does NOT rewrite settings.taxRate. The rate
   // is seeded from the country once at creation and owned by the garage after
@@ -107,42 +79,52 @@ export const updateGarageInfo = async ({ garageId, updateData }: UpdateInput) =>
   // The Settings form keeps the rate field visible alongside the picker so the
   // change is theirs to make.
 
-  const garage = await Garage.findByIdAndUpdate(
-    garageId,
-    { $set },
-    { new: true, runValidators: true }
-  );
+  const { address, settings, ...scalars } = changes;
+  const set: Record<string, unknown> = { ...scalars };
+  if (address && Object.keys(address).length > 0) {
+    set.address = sql`${garages.address} || ${JSON.stringify(address)}::jsonb`;
+  }
+  if (settings && Object.keys(settings).length > 0) {
+    set.settings = sql`${garages.settings} || ${JSON.stringify(settings)}::jsonb`;
+  }
+
+  const garage = Object.keys(set).length === 0
+    ? await db.query.garages.findFirst({ where: eq(garages._id, garageId) })
+    : (await db.update(garages).set(set).where(eq(garages._id, garageId)).returning())[0];
 
   if (!garage) {
     throw new HttpError('Garage not found', 404);
   }
 
-  log.info('Garage info updated', { garageId, fields: Object.keys($set) });
-  return garage;
+  log.info('Garage info updated', { garageId, fields: Object.keys(changes) });
+  return garageToApi(garage);
 };
 
 interface ListOwnerGaragesInput {
-  ownerId: Types.ObjectId | string;
+  ownerId: string;
 }
 
 /**
  * List every garage owned by an owner — powers the garage switcher / branch list.
  */
-export const listOwnerGarages = async ({ ownerId }: ListOwnerGaragesInput) => {
-  const garages = await Garage.find({ owner: ownerId }).sort({ createdAt: 1 });
-  return garages;
+export const listOwnerGarages = async ({ ownerId }: ListOwnerGaragesInput): Promise<ApiObject[]> => {
+  const rows = await db.query.garages.findMany({
+    where: eq(garages.ownerId, ownerId),
+    orderBy: [asc(garages.createdAt)]
+  });
+  return rows.map(garageToApi);
 };
 
 interface CreateAdditionalGarageInput {
-  ownerId: Types.ObjectId | string;
-  garageData: Pick<IGarage, 'name' | 'phone'> & Partial<Pick<IGarage, 'email' | 'gstNumber' | 'address'>>;
+  ownerId: string;
+  garageData: Record<string, unknown>;
 }
 
 /**
  * Create an additional branch for an existing owner, enforcing the free-plan cap.
  */
-export const createAdditionalGarage = async ({ ownerId, garageData }: CreateAdditionalGarageInput) => {
-  const existingCount = await Garage.countDocuments({ owner: ownerId });
+export const createAdditionalGarage = async ({ ownerId, garageData }: CreateAdditionalGarageInput): Promise<ApiObject> => {
+  const [{ existingCount }] = await db.select({ existingCount: count() }).from(garages).where(eq(garages.ownerId, ownerId));
   if (existingCount >= FREE_PLAN_LIMITS.maxGaragesPerOwner) {
     throw new HttpError(
       `You've reached the maximum of ${FREE_PLAN_LIMITS.maxGaragesPerOwner} garages on the free plan.`,
@@ -151,50 +133,60 @@ export const createAdditionalGarage = async ({ ownerId, garageData }: CreateAddi
   }
 
   // A branch inherits the owner's existing country and rates rather than
-  // falling back to the schema's India defaults — a GB owner's second branch
-  // must not silently come out as an Indian garage. Uses the oldest garage
-  // (their original one) as the template.
-  const homeGarage = await Garage.findOne({ owner: ownerId }).sort({ createdAt: 1 });
-  const inherited = homeGarage
-    ? {
-        country: homeGarage.country,
-        settings: {
-          taxRate: homeGarage.settings?.taxRate,
-          laborRatePerHour: homeGarage.settings?.laborRatePerHour,
-          currency: homeGarage.settings?.currency,
-          locale: homeGarage.settings?.locale,
-          taxLabel: homeGarage.settings?.taxLabel,
-          timezone: homeGarage.settings?.timezone
-        }
-      }
-    : {};
+  // falling back to the India defaults — a GB owner's second branch must not
+  // silently come out as an Indian garage. Uses the oldest garage (their
+  // original one) as the template.
+  const homeGarage = await db.query.garages.findFirst({
+    where: eq(garages.ownerId, ownerId),
+    orderBy: [asc(garages.createdAt)]
+  });
 
-  const garage = await Garage.create({ ...inherited, ...garageData, owner: ownerId });
+  const input = runSchema(createGarageSchema, {
+    ...(homeGarage ? { country: homeGarage.country } : {}),
+    ...garageData
+  });
+
+  const [garage] = await db.insert(garages).values({
+    ...input,
+    ownerId,
+    ...(homeGarage ? { settings: homeGarage.settings } : {})
+  }).returning();
+
   log.info('Additional garage created', { garageId: garage._id, ownerId, country: garage.country });
-  return garage;
+  return garageToApi(garage);
 };
 
 interface BranchStaffInput {
-  ownerId: Types.ObjectId | string;
+  ownerId: string;
   garageId: string;
 }
+
+const ownedGarage = async (ownerId: string, garageId: string): Promise<GarageRow> => {
+  const garage = await db.query.garages.findFirst({
+    where: and(eq(garages._id, garageId), eq(garages.ownerId, ownerId))
+  });
+  if (!garage) {
+    throw new HttpError('Garage not found', 404);
+  }
+  return garage;
+};
 
 /**
  * Staff (non-owner users) assigned to a specific branch — used by the client
  * to decide, before deleting a branch, whether to ask the owner what to do
  * with them (delete vs. reassign to another branch).
  */
-export const getBranchStaff = async ({ ownerId, garageId }: BranchStaffInput) => {
-  const garage = await Garage.findOne({ _id: garageId, owner: ownerId });
-  if (!garage) {
-    throw new HttpError('Garage not found', 404);
-  }
-  const staff = await User.find({ garage: garageId, role: { $ne: 'owner' } }).select('-password');
-  return staff;
+export const getBranchStaff = async ({ ownerId, garageId }: BranchStaffInput): Promise<ApiObject[]> => {
+  await ownedGarage(ownerId, garageId);
+  const staff = await db.query.users.findMany({
+    columns: USER_PUBLIC_COLUMNS,
+    where: and(eq(users.garageId, garageId), ne(users.role, 'owner'))
+  });
+  return staff.map(userToApi);
 };
 
 interface DeleteBranchInput {
-  ownerId: Types.ObjectId | string;
+  ownerId: string;
   garageId: string;
   staffAction?: 'delete' | 'reassign';
   reassignToGarageId?: string;
@@ -209,27 +201,31 @@ interface DeleteBranchInput {
  *   them (`staffAction`); this is a real, owner-facing choice made in the
  *   UI, not something to default silently. `getBranchStaff` above is what
  *   the client calls first to find out whether it needs to ask.
- * - The owner's own `User.garage` field is always repointed if it was
+ * - The owner's own `users.garage_id` is always repointed if it was
  *   pointing at the deleted branch — target garage on 'reassign', otherwise
  *   the oldest remaining branch — since leaving it dangling would break
- *   their own login (the exact bug class this whole feature has been about).
+ *   their own login. (The foreign key would now refuse the delete outright,
+ *   but the repoint is what keeps the owner signed in.)
  * - All business data scoped to the branch (customers, vehicles, job cards,
- *   invoices, inventory, reminders) is deleted with it; that data isn't
- *   something the "reassign" choice applies to, only staff accounts are.
+ *   invoices, inventory, reminders) goes with it through the `garage_id`
+ *   cascade; that data isn't something the "reassign" choice applies to,
+ *   only staff accounts are.
  */
 export const deleteBranch = async ({ ownerId, garageId, staffAction, reassignToGarageId }: DeleteBranchInput) => {
-  const garage = await Garage.findOne({ _id: garageId, owner: ownerId });
-  if (!garage) {
-    throw new HttpError('Garage not found', 404);
-  }
+  const garage = await ownedGarage(ownerId, garageId);
 
-  const allGarages = await Garage.find({ owner: ownerId }).sort({ createdAt: 1 });
+  const allGarages = await db.query.garages.findMany({
+    columns: { _id: true },
+    where: eq(garages.ownerId, ownerId),
+    orderBy: [asc(garages.createdAt)]
+  });
   if (allGarages.length <= 1) {
     throw new HttpError('You must have at least one branch. This is your only branch and cannot be deleted.', 400);
   }
-  const remaining = allGarages.filter(g => String(g._id) !== String(garageId));
+  const remaining = allGarages.filter(g => g._id !== garageId);
 
-  const staffCount = await User.countDocuments({ garage: garageId, role: { $ne: 'owner' } });
+  const [{ staffCount }] = await db.select({ staffCount: count() }).from(users)
+    .where(and(eq(users.garageId, garageId), ne(users.role, 'owner')));
   if (staffCount > 0 && !staffAction) {
     throw new HttpError(
       `This branch has ${staffCount} staff member(s) assigned. Specify staffAction ('delete' or 'reassign') to proceed.`,
@@ -242,36 +238,35 @@ export const deleteBranch = async ({ ownerId, garageId, staffAction, reassignToG
     if (!reassignToGarageId) {
       throw new HttpError('reassignToGarageId is required when staffAction is "reassign".', 400);
     }
-    const target = remaining.find(g => String(g._id) === String(reassignToGarageId));
+    const target = remaining.find(g => g._id === reassignToGarageId);
     if (!target) {
       throw new HttpError('The target branch was not found among your other branches.', 400);
     }
-    reassignTarget = String(target._id);
+    reassignTarget = target._id;
   }
 
   // Fallback branch for the owner's own `garage` ref if this was their default —
   // the reassign target if one was chosen, otherwise just the oldest survivor.
-  const fallbackGarageId = reassignTarget ?? String(remaining[0]._id);
-  await User.updateOne({ _id: ownerId, garage: garageId }, { $set: { garage: fallbackGarageId } });
+  const fallbackGarageId = reassignTarget ?? remaining[0]._id;
 
-  if (staffCount > 0) {
-    if (staffAction === 'delete') {
-      await User.deleteMany({ garage: garageId, role: { $ne: 'owner' } });
-    } else {
-      await User.updateMany({ garage: garageId, role: { $ne: 'owner' } }, { $set: { garage: reassignTarget } });
+  await db.transaction(async tx => {
+    await tx.update(users).set({ garageId: fallbackGarageId })
+      .where(and(eq(users._id, ownerId), eq(users.garageId, garageId)));
+
+    if (staffCount > 0) {
+      if (staffAction === 'delete') {
+        await tx.delete(users).where(and(eq(users.garageId, garageId), ne(users.role, 'owner')));
+      } else {
+        await tx.update(users).set({ garageId: reassignTarget! })
+          .where(and(eq(users.garageId, garageId), ne(users.role, 'owner')));
+      }
     }
-  }
 
-  await Promise.all([
-    Customer.deleteMany({ garage: garageId }),
-    Vehicle.deleteMany({ garage: garageId }),
-    JobCard.deleteMany({ garage: garageId }),
-    Invoice.deleteMany({ garage: garageId }),
-    Inventory.deleteMany({ garage: garageId }),
-    ServiceReminder.deleteMany({ garage: garageId })
-  ]);
-  await Garage.findByIdAndDelete(garageId);
+    // Customers, vehicles, job cards, invoices, inventory and reminders all
+    // cascade from garage_id.
+    await tx.delete(garages).where(eq(garages._id, garageId));
+  });
 
   log.warn('Owner deleted a branch', { ownerId, garageId, name: garage.name, staffAction: staffAction || 'none', staffCount });
-  return { deletedGarageId: String(garage._id), fallbackGarageId };
+  return { deletedGarageId: garage._id, fallbackGarageId };
 };

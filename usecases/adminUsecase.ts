@@ -1,16 +1,18 @@
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
-import mongoose from 'mongoose';
 import os from 'os';
-import Admin from '../models/Admin';
-import User from '../models/User';
-import Garage from '../models/Garage';
-import Customer from '../models/Customer';
-import Vehicle from '../models/Vehicle';
-import JobCard from '../models/JobCard';
-import Invoice from '../models/Invoice';
-import Inventory from '../models/Inventory';
-import ServiceReminder from '../models/ServiceReminder';
+import { count, desc, eq, inArray, sql, sum } from 'drizzle-orm';
+import { PgTable } from 'drizzle-orm/pg-core';
+import { db, pingDb } from '../config/db';
+import { admins } from '../models/Admin';
+import { users, USER_PUBLIC_COLUMNS, userToApi } from '../models/User';
+import { garages, garageToApi } from '../models/Garage';
+import { customers } from '../models/Customer';
+import { vehicles } from '../models/Vehicle';
+import { jobCards } from '../models/JobCard';
+import { invoices } from '../models/Invoice';
+import { inventory } from '../models/Inventory';
+import { serviceReminders } from '../models/ServiceReminder';
+import { comparePassword } from '../utils/password';
 import logger from '../utils/logger';
 import { resolveGarageLocale } from '../utils/locale';
 import { HttpError } from '../utils/httpError';
@@ -23,8 +25,8 @@ const log = logger.child('AdminUsecase');
 const DUMMY_HASH = '$2b$12$C6UzMDM.H6dfI/f/IKcEeO3Uh1PJ8h1kQhVQF0Z0j4kQhVQF0Z0j4';
 
 // ─── Credentials ───────────────────────────────────────────────────────────
-// Admin identities live in the `admins` collection (see models/Admin.ts), not
-// in environment variables. Only the token-signing secret is env-supplied.
+// Admin identities live in the `admins` table (see models/Admin.ts), not in
+// environment variables. Only the token-signing secret is env-supplied.
 //
 // Read lazily rather than at module load: `app.ts` is imported by every test
 // and by `scripts/`, and throwing during import would take all of them down
@@ -60,14 +62,11 @@ export const adminLogin = async ({ email, password }: AdminLoginInput): Promise<
 
   const secret = adminSecret();
 
-  // `password` is `select: false` on the schema, so it has to be asked for.
-  const admin = await Admin.findOne({ email: normalisedEmail }).select('+password');
+  const admin = await db.query.admins.findFirst({ where: eq(admins.email, normalisedEmail) });
 
   // Run the compare even when there is no such admin, against a dummy hash, so
   // an unknown email and a wrong password take the same time to answer.
-  const passwordMatches = admin
-    ? await admin.matchPassword(password || '')
-    : await bcrypt.compare(password || '', DUMMY_HASH);
+  const passwordMatches = await comparePassword(password || '', admin ? admin.password : DUMMY_HASH);
 
   if (!admin || !passwordMatches || !admin.isActive) {
     log.warn('Admin login failed', {
@@ -79,11 +78,11 @@ export const adminLogin = async ({ email, password }: AdminLoginInput): Promise<
 
   // Not awaited into the response: a failed bookkeeping write should not fail
   // an otherwise valid login.
-  Admin.updateOne({ _id: admin._id }, { $set: { lastLoginAt: new Date() } })
+  db.update(admins).set({ lastLoginAt: new Date() }).where(eq(admins._id, admin._id))
     .catch(err => log.warn('Could not record admin lastLoginAt', { error: (err as Error).message }));
 
   const token = jwt.sign(
-    { isSuperAdmin: true, sub: admin._id.toString(), email: admin.email },
+    { isSuperAdmin: true, sub: admin._id, email: admin.email },
     secret,
     { expiresIn: TOKEN_TTL }
   );
@@ -91,7 +90,7 @@ export const adminLogin = async ({ email, password }: AdminLoginInput): Promise<
   log.info('Admin login successful', { adminId: admin._id, email: admin.email });
   return {
     token,
-    admin: { id: admin._id.toString(), name: admin.name, email: admin.email, role: 'super_admin' }
+    admin: { id: admin._id, name: admin.name, email: admin.email, role: 'super_admin' }
   };
 };
 
@@ -119,13 +118,21 @@ export const verifyAdminToken = async (token: string): Promise<AdminTokenPayload
     throw new HttpError('Invalid admin token', 401);
   }
 
-  const admin = await Admin.findById(decoded.sub).select('_id email isActive');
+  const admin = await db.query.admins.findFirst({
+    columns: { _id: true, email: true, isActive: true },
+    where: eq(admins._id, decoded.sub)
+  });
   if (!admin || !admin.isActive) {
     log.warn('Admin token rejected — account missing or deactivated', { adminId: decoded.sub });
     throw new HttpError('Invalid admin token', 401);
   }
 
   return decoded;
+};
+
+const countAll = async (table: PgTable): Promise<number> => {
+  const [{ value }] = await db.select({ value: count() }).from(table);
+  return value;
 };
 
 /**
@@ -136,26 +143,22 @@ export const getSystemStats = async () => {
   log.info('Compiling system-wide stats');
   const startTime = Date.now();
 
-  const [garages, users, customers, vehicles, jobCards, invoices, inventory, reminders] = await Promise.all([
-    Garage.countDocuments(),
-    User.countDocuments(),
-    Customer.countDocuments(),
-    Vehicle.countDocuments(),
-    JobCard.countDocuments(),
-    Invoice.countDocuments(),
-    Inventory.countDocuments(),
-    ServiceReminder.countDocuments()
+  const [garageCount, userCount, customerCount, vehicleCount, jobCardCount, invoiceCount, inventoryCount, reminderCount] = await Promise.all([
+    countAll(garages),
+    countAll(users),
+    countAll(customers),
+    countAll(vehicles),
+    countAll(jobCards),
+    countAll(invoices),
+    countAll(inventory),
+    countAll(serviceReminders)
   ]);
 
-  const [revenueAgg, jobsByStatusRaw, recentGarages, recentUsers] = await Promise.all([
-    Invoice.aggregate([
-      { $group: { _id: null, total: { $sum: '$grandTotal' }, paid: { $sum: '$amountPaid' } } }
-    ]),
-    JobCard.aggregate([
-      { $group: { _id: '$status', count: { $sum: 1 } } }
-    ]),
-    Garage.find().sort({ createdAt: -1 }).limit(5).lean(),
-    User.find().select('-password').sort({ createdAt: -1 }).limit(10).lean()
+  const [[revenueAgg], jobsByStatusRaw, recentGarages, recentUsers] = await Promise.all([
+    db.select({ total: sum(invoices.grandTotal), paid: sum(invoices.amountPaid) }).from(invoices),
+    db.select({ status: jobCards.status, count: count() }).from(jobCards).groupBy(jobCards.status),
+    db.query.garages.findMany({ orderBy: [desc(garages.createdAt)], limit: 5 }),
+    db.query.users.findMany({ columns: USER_PUBLIC_COLUMNS, orderBy: [desc(users.createdAt)], limit: 10 })
   ]);
 
   const queryTimeMs = Date.now() - startTime;
@@ -163,14 +166,19 @@ export const getSystemStats = async () => {
     log.warn('Slow system stats compilation', { queryTimeMs });
   }
 
-  log.info('System stats compiled', { garages, users, customers, vehicles, jobCards, queryTimeMs });
+  log.info('System stats compiled', {
+    garages: garageCount, users: userCount, customers: customerCount, vehicles: vehicleCount, jobCards: jobCardCount, queryTimeMs
+  });
 
   return {
-    counts: { garages, users, customers, vehicles, jobCards, invoices, inventory, reminders },
-    revenue: revenueAgg[0] || { total: 0, paid: 0 },
-    jobsByStatus: Object.fromEntries(jobsByStatusRaw.map((j: { _id: string; count: number }) => [j._id, j.count])),
-    recentGarages,
-    recentUsers,
+    counts: {
+      garages: garageCount, users: userCount, customers: customerCount, vehicles: vehicleCount,
+      jobCards: jobCardCount, invoices: invoiceCount, inventory: inventoryCount, reminders: reminderCount
+    },
+    revenue: { total: Number(revenueAgg?.total) || 0, paid: Number(revenueAgg?.paid) || 0 },
+    jobsByStatus: Object.fromEntries(jobsByStatusRaw.map(j => [j.status, j.count])),
+    recentGarages: recentGarages.map(garageToApi),
+    recentUsers: recentUsers.map(userToApi),
     queryTimeMs
   };
 };
@@ -182,31 +190,27 @@ export const getSystemStats = async () => {
 export const getAllGarages = async () => {
   log.info('Fetching all garages with enrichment');
 
-  const garages = await Garage.find()
-    .populate('owner', 'name email phone role')
-    .sort({ createdAt: -1 })
-    .lean();
+  const rows = await db.query.garages.findMany({
+    with: { owner: { columns: { _id: true, name: true, email: true, phone: true, role: true } } },
+    orderBy: [desc(garages.createdAt)]
+  });
 
   const enriched = await Promise.all(
-    garages.map(async (g) => {
-      const [userCount, customerCount, jobCardCount, invoiceCount, revAgg] = await Promise.all([
-        User.countDocuments({ garage: g._id }),
-        Customer.countDocuments({ garage: g._id }),
-        JobCard.countDocuments({ garage: g._id }),
-        Invoice.countDocuments({ garage: g._id }),
-        Invoice.aggregate([
-          { $match: { garage: g._id } },
-          { $group: { _id: null, total: { $sum: '$grandTotal' } } }
-        ])
+    rows.map(async (g) => {
+      const [[{ userCount }], [{ customerCount }], [{ jobCardCount }], [{ invoiceCount, revenue }]] = await Promise.all([
+        db.select({ userCount: count() }).from(users).where(eq(users.garageId, g._id)),
+        db.select({ customerCount: count() }).from(customers).where(eq(customers.garageId, g._id)),
+        db.select({ jobCardCount: count() }).from(jobCards).where(eq(jobCards.garageId, g._id)),
+        db.select({ invoiceCount: count(), revenue: sum(invoices.grandTotal) }).from(invoices).where(eq(invoices.garageId, g._id))
       ]);
 
       return {
-        ...g,
+        ...garageToApi(g),
         // Each row's revenue is in ITS OWN currency — the admin list spans
         // every tenant, so there is no single currency to render it in.
         locale: resolveGarageLocale(g),
         _counts: { users: userCount, customers: customerCount, jobCards: jobCardCount, invoices: invoiceCount },
-        _revenue: revAgg[0]?.total || 0
+        _revenue: Number(revenue) || 0
       };
     })
   );
@@ -218,37 +222,28 @@ export const getAllGarages = async () => {
 /**
  * Delete a garage that has no owner.
  *
- * This exists specifically for the ownerless-garage bug in registerNewGarage
- * (fixed, but pre-existing/reproduced orphans still need cleanup): a garage
- * left behind when User.create() failed after Garage.create() had already
- * succeeded. Deliberately refuses to delete any garage that DOES have an
- * owner — that's a real, active garage with real data, and deleting it is a
- * much bigger, more deliberate action than this endpoint is for. Also wipes
- * anything scoped to the garage (should normally be nothing, since no owner
- * ever existed to create customers/vehicles/etc, but cheap to be thorough).
+ * Registration now creates the garage and its owner in one transaction, so
+ * new orphans cannot appear; this remains for any that pre-date that, and as
+ * the cleanup path when an owner's row is removed by other means (the
+ * `owner_id` foreign key nulls the garage rather than deleting it).
+ * Deliberately refuses to delete any garage that DOES have an owner — that's
+ * a real, active garage with real data, and deleting it is a much bigger,
+ * more deliberate action than this endpoint is for. Everything scoped to the
+ * garage cascades from `garage_id`.
  */
 export const deleteOrphanedGarage = async (garageId: string): Promise<{ deletedGarage: { id: string; name: string } }> => {
-  const garage = await Garage.findById(garageId);
+  const garage = await db.query.garages.findFirst({ where: eq(garages._id, garageId) });
   if (!garage) {
     throw new HttpError('Garage not found', 404);
   }
-  if (garage.owner) {
+  if (garage.ownerId) {
     throw new HttpError('Refusing to delete a garage that has an owner. This action is only for ownerless (orphaned) garages.', 400);
   }
 
-  await Promise.all([
-    Customer.deleteMany({ garage: garageId }),
-    Vehicle.deleteMany({ garage: garageId }),
-    JobCard.deleteMany({ garage: garageId }),
-    Invoice.deleteMany({ garage: garageId }),
-    Inventory.deleteMany({ garage: garageId }),
-    ServiceReminder.deleteMany({ garage: garageId }),
-    User.deleteMany({ garage: garageId })
-  ]);
-  await Garage.findByIdAndDelete(garageId);
+  await db.delete(garages).where(eq(garages._id, garageId));
 
   log.warn('Admin deleted an orphaned (ownerless) garage', { garageId, name: garage.name });
-  return { deletedGarage: { id: String(garage._id), name: garage.name } };
+  return { deletedGarage: { id: garage._id, name: garage.name } };
 };
 
 /**
@@ -256,13 +251,13 @@ export const deleteOrphanedGarage = async (garageId: string): Promise<{ deletedG
  */
 export const getAllUsers = async () => {
   log.info('Fetching all platform users');
-  const users = await User.find()
-    .select('-password')
-    .populate('garage', 'name')
-    .sort({ createdAt: -1 })
-    .lean();
-  log.info('All platform users fetched', { count: users.length });
-  return users;
+  const rows = await db.query.users.findMany({
+    columns: USER_PUBLIC_COLUMNS,
+    with: { garage: { columns: { _id: true, name: true } } },
+    orderBy: [desc(users.createdAt)]
+  });
+  log.info('All platform users fetched', { count: rows.length });
+  return rows.map(userToApi);
 };
 
 export interface DeleteUserResult {
@@ -283,73 +278,84 @@ export interface DeleteUserResult {
  * Delete a platform user.
  *
  * - Staff (non-owner): deletes just that user record. Old records that
- *   reference them (assignedMechanic, uploadedBy, invoice.createdBy, ...)
- *   are left as-is — they'll simply show as an unknown/removed staff member.
+ *   reference them (assignedMechanic, invoice.createdBy, ...) are nulled by
+ *   the foreign keys — they'll simply show as an unknown/removed staff member.
  * - Owner: an owner-less garage can't exist in this app's model, so this
  *   cascades — every garage (branch) they own, and everything scoped to
  *   those garages (customers, vehicles, job cards, invoices, inventory,
  *   reminders, and any staff assigned to those branches), is deleted too.
- *   Not wrapped in a transaction: this codebase's tests run against a
- *   standalone Mongo instance (no replica set), which doesn't support them.
+ *   The counts are taken first so the response can report what went; the
+ *   deletion itself is one transaction.
  */
 export const deleteUser = async (userId: string): Promise<DeleteUserResult> => {
-  const user = await User.findById(userId);
+  const user = await db.query.users.findFirst({ columns: USER_PUBLIC_COLUMNS, where: eq(users._id, userId) });
   if (!user) {
     throw new HttpError('User not found', 404);
   }
 
   if (user.role !== 'owner') {
-    await User.findByIdAndDelete(userId);
+    await db.delete(users).where(eq(users._id, userId));
     log.warn('Admin deleted a staff user', { userId, email: user.email, role: user.role });
-    return { deletedUser: { id: String(user._id), email: user.email, role: user.role } };
+    return { deletedUser: { id: user._id, email: user.email, role: user.role } };
   }
 
-  const garages = await Garage.find({ owner: userId }).select('_id');
-  const garageIds = garages.map(g => g._id);
+  const owned = await db.select({ _id: garages._id }).from(garages).where(eq(garages.ownerId, userId));
+  const garageIds = owned.map(g => g._id);
 
-  const [customers, vehicles, jobCards, invoices, inventory, reminders, users] = await Promise.all([
-    Customer.deleteMany({ garage: { $in: garageIds } }),
-    Vehicle.deleteMany({ garage: { $in: garageIds } }),
-    JobCard.deleteMany({ garage: { $in: garageIds } }),
-    Invoice.deleteMany({ garage: { $in: garageIds } }),
-    Inventory.deleteMany({ garage: { $in: garageIds } }),
-    ServiceReminder.deleteMany({ garage: { $in: garageIds } }),
-    // $or also matches the owner by _id in case their own `garage` field
-    // somehow doesn't point at one of their own branches.
-    User.deleteMany({ $or: [{ garage: { $in: garageIds } }, { _id: userId }] })
+  const scoped = async (table: typeof customers | typeof vehicles | typeof jobCards | typeof invoices | typeof inventory | typeof serviceReminders) => {
+    if (garageIds.length === 0) return 0;
+    const [{ value }] = await db.select({ value: count() }).from(table).where(inArray(table.garageId, garageIds));
+    return value;
+  };
+
+  const [customerCount, vehicleCount, jobCardCount, invoiceCount, inventoryCount, reminderCount, [{ userCount }]] = await Promise.all([
+    scoped(customers),
+    scoped(vehicles),
+    scoped(jobCards),
+    scoped(invoices),
+    scoped(inventory),
+    scoped(serviceReminders),
+    // Also counts the owner by _id in case their own `garage` field somehow
+    // doesn't point at one of their own branches.
+    db.select({ userCount: count() }).from(users).where(
+      garageIds.length ? sql`${users.garageId} in ${garageIds} or ${users._id} = ${userId}` : eq(users._id, userId)
+    )
   ]);
 
-  await Garage.deleteMany({ _id: { $in: garageIds } });
+  await db.transaction(async tx => {
+    if (garageIds.length) {
+      // Staff and every tenant row cascade from the garages.
+      await tx.delete(garages).where(inArray(garages._id, garageIds));
+    }
+    await tx.delete(users).where(eq(users._id, userId));
+  });
+
+  const counts = {
+    users: userCount, customers: customerCount, vehicles: vehicleCount,
+    jobCards: jobCardCount, invoices: invoiceCount, inventory: inventoryCount,
+    reminders: reminderCount
+  };
 
   log.warn('Admin cascade-deleted an owner and their garage(s)', {
-    userId, email: user.email, garageCount: garageIds.length,
-    counts: {
-      users: users.deletedCount, customers: customers.deletedCount, vehicles: vehicles.deletedCount,
-      jobCards: jobCards.deletedCount, invoices: invoices.deletedCount, inventory: inventory.deletedCount,
-      reminders: reminders.deletedCount
-    }
+    userId, email: user.email, garageCount: garageIds.length, counts
   });
 
   return {
-    deletedUser: { id: String(user._id), email: user.email, role: user.role },
+    deletedUser: { id: user._id, email: user.email, role: user.role },
     cascadedGarages: garageIds.length,
-    cascadedCounts: {
-      users: users.deletedCount, customers: customers.deletedCount, vehicles: vehicles.deletedCount,
-      jobCards: jobCards.deletedCount, invoices: invoices.deletedCount, inventory: inventory.deletedCount,
-      reminders: reminders.deletedCount
-    }
+    cascadedCounts: counts
   };
 };
 
 /**
  * Return system health info: process memory, CPU, DB connection, platform metadata.
  */
-export const getHealthInfo = () => {
+export const getHealthInfo = async () => {
   log.info('System health check requested');
 
   const memUsage = process.memoryUsage();
   const fmt = (b: number) => (b / 1024 / 1024).toFixed(2) + ' MB';
-  const dbStates = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+  const dbReachable = await pingDb();
 
   const health = {
     uptime: {
@@ -374,9 +380,8 @@ export const getHealthInfo = () => {
       arch: os.arch()
     },
     database: {
-      status: dbStates[mongoose.connection.readyState] || 'unknown',
-      host:   mongoose.connection.host || 'N/A',
-      name:   mongoose.connection.name || 'N/A'
+      status: dbReachable ? 'connected' : 'disconnected',
+      engine: 'postgresql'
     },
     environment: process.env.NODE_ENV || 'development'
   };

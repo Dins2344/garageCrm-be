@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import app from '../app';
-import Garage from '../models/Garage';
+import { schema, findById } from './helpers/dbAccess';
 import { resolveGarageLocale } from '../utils/locale';
 import { COUNTRIES } from '../config/countries';
 import { registerGarageOwner, createGarageWithOwner, addGarageToOwner, nextPhone, authHeader } from './helpers/factories';
@@ -77,7 +77,7 @@ describe('Country-aware registration', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.locale.currency).toBe('INR');
 
-    const garage = await Garage.findById(res.body.data.garage);
+    const garage = await findById(schema.garages, res.body.data.garage);
     expect(garage!.country).toBe('IN');
     expect(garage!.settings.taxRate).toBe(18);
   });
@@ -99,7 +99,7 @@ describe('Country-aware registration', () => {
       country: 'GB', currency: 'GBP', locale: 'en-GB', taxLabel: 'VAT', taxIdLabel: 'VAT No.',
     });
 
-    const garage = await Garage.findById(res.body.data.garage);
+    const garage = await findById(schema.garages, res.body.data.garage);
     expect(garage!.country).toBe('GB');
     // Seeded from the country table, not the schema's Indian defaults.
     expect(garage!.settings.taxRate).toBe(20);

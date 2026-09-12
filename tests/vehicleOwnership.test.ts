@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import app from '../app';
-import Customer from '../models/Customer';
+import { eq } from 'drizzle-orm';
+import { db, schema } from './helpers/dbAccess';
 import { createGarageWithOwner, nextPhone, authHeader } from './helpers/factories';
 
 /**
@@ -36,10 +37,10 @@ const makeVehicle = async (ctx: Ctx, customerId: string, plate: string) => {
   return res.body.data._id as string;
 };
 
-/** The array as stored, which is exactly what the clients count. */
+/** The vehicles that point at the customer — what the API's `vehicles` array is derived from. */
 const vehicleIdsOf = async (customerId: string) => {
-  const customer = await Customer.findById(customerId).select('vehicles').lean();
-  return (customer?.vehicles ?? []).map(id => id.toString());
+  const rows = await db.select({ _id: schema.vehicles._id }).from(schema.vehicles).where(eq(schema.vehicles.customerId, customerId));
+  return rows.map(r => r._id);
 };
 
 describe('vehicle ownership', () => {

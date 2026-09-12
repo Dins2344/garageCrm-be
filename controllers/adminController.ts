@@ -100,10 +100,10 @@ export const deleteUser = async (req: Request, res: Response, next: NextFunction
 
 // @desc    System health info
 // @route   GET /api/admin/health
-export const getHealth = (req: Request, res: Response, next: NextFunction): void => {
+export const getHealth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     log.info('Admin health check', { adminEmail: req.admin?.email });
-    const health = adminUsecase.getHealthInfo();
+    const health = await adminUsecase.getHealthInfo();
     res.json({ success: true, data: health });
   } catch (error) {
     log.error('Failed to get health info', { error: (error as Error).message });

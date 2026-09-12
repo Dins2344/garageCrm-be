@@ -7,11 +7,10 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import hpp from 'hpp';
 import cookieParser from 'cookie-parser';
-import mongoose from 'mongoose';
 import os from 'os';
 import swaggerUi from 'swagger-ui-express';
 
-import mongoSanitize from './middleware/mongoSanitize';
+import { pingDb } from './config/db';
 import errorHandler from './middleware/errorHandler';
 import logger from './utils/logger';
 import swaggerSpec from './config/swagger';
@@ -51,8 +50,9 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
 
 // 3. Security & Performance middleware — Now they have req.body to work with
+// (No body sanitiser any more: every query is parameterised SQL, so there is
+// no operator-injection class for a `$`-key stripper to defend against.)
 app.use(helmet());           // Standard security headers
-app.use(mongoSanitize);      // DATA SANITIZATION against NoSQL injection
 app.use(hpp());               // PREVENT HTTP PARAMETER POLLUTION
 app.use(compression());       // GZIP COMPRESSION for smaller payloads
 
@@ -97,7 +97,7 @@ app.get('/api/health', async (_req, res) => {
   const memUsage = process.memoryUsage();
   const formatMB = (bytes: number) => (bytes / 1024 / 1024).toFixed(2) + ' MB';
 
-  const dbStates = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+  const dbReachable = await pingDb();
 
   res.json({
     success: true,
@@ -125,8 +125,7 @@ app.get('/api/health', async (_req, res) => {
       arch: os.arch()
     },
     database: {
-      status: dbStates[mongoose.connection.readyState] || 'unknown',
-      host: mongoose.connection.host || 'N/A'
+      status: dbReachable ? 'connected' : 'disconnected'
     },
     environment: process.env.NODE_ENV || 'development'
   });

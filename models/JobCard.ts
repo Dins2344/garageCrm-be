@@ -1,226 +1,160 @@
-import mongoose, { Document, Schema, Types } from 'mongoose';
-import { ServiceType, SERVICE_TYPES, ComplaintPriority, COMPLAINT_PRIORITIES, JobStatus, JOB_STATUSES } from '../types/domain';
+import { z } from 'zod';
+import {
+  jobCards, Complaint, JobCardPhoto, StatusHistoryEntry, Estimation, EstimationPart, EstimationLabor
+} from '../config/schema';
+import { SERVICE_TYPES, COMPLAINT_PRIORITIES, JOB_STATUSES } from '../types/domain';
+import { requiredString, optionalString, numberField, boundedNumber, nullableDate, idField } from '../utils/validation';
+import { serializeRow, ApiObject } from '../utils/serialize';
 
-export interface IComplaint {
-  description: string;
-  priority: ComplaintPriority;
-}
+export { jobCards };
+export type JobCardRow = typeof jobCards.$inferSelect;
+export type NewJobCard = typeof jobCards.$inferInsert;
+export type {
+  Complaint as IComplaint,
+  JobCardPhoto as IJobCardPhoto,
+  StatusHistoryEntry as IStatusHistoryEntry,
+  Estimation as IEstimation,
+  EstimationPart as IEstimationPart,
+  EstimationLabor as IEstimationLabor
+};
 
-export interface IJobCardPhoto {
-  url: string;
-  caption: string;
-  uploadedAt: Date;
-  uploadedBy: Types.ObjectId;
-}
-
-export interface IStatusHistoryEntry {
-  status: string;
-  changedBy: Types.ObjectId;
-  changedAt: Date;
-  notes: string;
-}
-
-export interface IEstimationPart {
-  inventoryItem: Types.ObjectId;
-  partName: string;
-  quantity: number;
-  unitPrice: number;
-  total: number;
-}
-
-export interface IEstimationLabor {
-  description: string;
-  hours: number;
-  ratePerHour: number;
-  total: number;
-}
-
-export interface IEstimation {
-  parts: IEstimationPart[];
-  labor: IEstimationLabor[];
-  subtotal: number;
-  taxRate: number;
-  taxAmount: number;
-  discount: number;
-  grandTotal: number;
-  approvedByCustomer: boolean;
-  approvedAt: Date | null;
-  sentAt: Date | null;
-}
-
-export interface IJobCard extends Document {
-  _id: Types.ObjectId;
-  serviceType: ServiceType;
-  jobCardNumber: string;
-  vehicle: Types.ObjectId;
-  customer: Types.ObjectId;
-  garage: Types.ObjectId;
-  complaints: IComplaint[];
-  photos: IJobCardPhoto[];
-  assignedMechanic: Types.ObjectId | null;
-  assignedAdvisor: Types.ObjectId | null;
-  status: JobStatus;
-  statusHistory: IStatusHistoryEntry[];
-  estimation: IEstimation;
-  odometerAtIntake: number;
-  expectedDeliveryDate: Date | null;
-  actualDeliveryDate: Date | null;
-  internalNotes: string;
-  invoice: Types.ObjectId | null;
-  createdBy: Types.ObjectId;
-  estimationToken: string | null;
-  isSample: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const jobCardSchema = new Schema<IJobCard>({
-  serviceType: {
-    type: String,
-    enum: SERVICE_TYPES,
-    required: true
-  },
-  jobCardNumber: {
-    type: String,
-    required: true
-  },
-  vehicle: {
-    type: Schema.Types.ObjectId,
-    ref: 'Vehicle',
-    required: true
-  },
-  customer: {
-    type: Schema.Types.ObjectId,
-    ref: 'Customer',
-    required: true
-  },
-  garage: {
-    type: Schema.Types.ObjectId,
-    ref: 'Garage',
-    required: true
-  },
-  // Customer complaints / service requests
-  complaints: [{
-    description: { type: String, required: true },
-    priority: { type: String, enum: COMPLAINT_PRIORITIES, default: 'medium' }
-  }],
-  // Vehicle photos (scratches, dents — for liability)
-  photos: [{
-    url: { type: String },
-    caption: { type: String, default: '' },
-    uploadedAt: { type: Date, default: Date.now },
-    uploadedBy: { type: Schema.Types.ObjectId, ref: 'User' }
-  }],
-  // Mechanic assignment
-  assignedMechanic: {
-    type: Schema.Types.ObjectId,
-    ref: 'User',
-    default: null
-  },
-  assignedAdvisor: {
-    type: Schema.Types.ObjectId,
-    ref: 'User',
-    default: null
-  },
-  // Job card status flow
-  status: {
-    type: String,
-    enum: JOB_STATUSES,
-    default: 'new'
-  },
-  // Status history for audit trail
-  statusHistory: [{
-    status: { type: String },
-    changedBy: { type: Schema.Types.ObjectId, ref: 'User' },
-    changedAt: { type: Date, default: Date.now },
-    notes: { type: String, default: '' }
-  }],
-  // Estimation (parts + labor)
-  estimation: {
-    parts: [{
-      inventoryItem: { type: Schema.Types.ObjectId, ref: 'Inventory' },
-      partName: { type: String },
-      quantity: { type: Number, default: 1 },
-      unitPrice: { type: Number, default: 0 },
-      total: { type: Number, default: 0 }
-    }],
-    labor: [{
-      description: { type: String },
-      hours: { type: Number, default: 1 },
-      ratePerHour: { type: Number, default: 0 },
-      total: { type: Number, default: 0 }
-    }],
-    subtotal: { type: Number, default: 0 },
-    taxRate: { type: Number, default: 18 },
-    taxAmount: { type: Number, default: 0 },
-    discount: { type: Number, default: 0 },
-    grandTotal: { type: Number, default: 0 },
-    approvedByCustomer: { type: Boolean, default: false },
-    approvedAt: { type: Date, default: null },
-    sentAt: { type: Date, default: null }
-  },
-  // Odometer at intake
-  odometerAtIntake: {
-    type: Number,
-    required: [true, 'Odometer reading is required'],
-    min: [0, 'Odometer reading cannot be negative'],
-    // 9,999,999 km is far beyond any real vehicle — a value above this is a
-    // data-entry error (e.g. digits accidentally entered twice), not a
-    // genuine reading. Enforced here so no client can bypass it.
-    max: [9999999, 'Odometer reading looks too large — please check the value']
-  },
-  // Expected & actual dates
-  expectedDeliveryDate: {
-    type: Date,
-    default: null
-  },
-  actualDeliveryDate: {
-    type: Date,
-    default: null
-  },
-  // Internal notes
-  internalNotes: {
-    type: String,
-    default: ''
-  },
-  // Reference to generated invoice
-  invoice: {
-    type: Schema.Types.ObjectId,
-    ref: 'Invoice',
-    default: null
-  },
-  createdBy: {
-    type: Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  // Token used in the customer-facing estimation approval link
-  estimationToken: {
-    type: String,
-    default: null
-  },
-  // See the note on Customer.isSample — display and cleanup only.
-  isSample: {
-    type: Boolean,
-    default: false
-  }
-}, {
-  timestamps: true
+/**
+ * A `statusHistory` entry, timestamped at creation the way the embedded
+ * subdocument's `changedAt: Date.now` default did. Stored as an ISO string
+ * inside the JSONB column.
+ */
+export const historyEntry = (status: string, changedBy: string | null, notes = ''): StatusHistoryEntry => ({
+  status,
+  changedBy,
+  changedAt: new Date().toISOString(),
+  notes
 });
 
-// Auto-generate job card number (only on creation)
-jobCardSchema.pre('validate', async function (this: IJobCard) {
-  if (this.isNew && !this.jobCardNumber) {
-    const count = await mongoose.model('JobCard').countDocuments({ garage: this.garage });
-    const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-    this.jobCardNumber = `JC-${dateStr}-${String(count + 1).padStart(4, '0')}`;
-  }
+const complaintSchema = z.object({
+  description: requiredString('Complaint description is required'),
+  priority: z.enum(COMPLAINT_PRIORITIES, { error: `Priority must be one of: ${COMPLAINT_PRIORITIES.join(', ')}` }).default('medium')
 });
 
-// Compound unique: same jobCardNumber allowed across garages, unique within a garage
-jobCardSchema.index({ garage: 1, jobCardNumber: 1 }, { unique: true });
-jobCardSchema.index({ garage: 1, status: 1 });
-jobCardSchema.index({ garage: 1, createdAt: -1 });
-jobCardSchema.index({ assignedMechanic: 1, status: 1 });
+const photoSchema = z.object({
+  url: optionalString(),
+  caption: optionalString(),
+  uploadedAt: z.string().default(() => new Date().toISOString()),
+  uploadedBy: z.string().nullable().default(null)
+});
 
-export default mongoose.model<IJobCard>('JobCard', jobCardSchema);
+const serviceTypeField = z.enum(SERVICE_TYPES, { error: `Service type must be one of: ${SERVICE_TYPES.join(', ')}` });
+const statusField = z.enum(JOB_STATUSES, { error: `Status must be one of: ${JOB_STATUSES.join(', ')}` });
+const nullableId = z.preprocess(v => (v === '' ? null : v), z.string().nullable());
+
+// 9,999,999 km is far beyond any real vehicle — a value above this is a
+// data-entry error (e.g. digits accidentally entered twice), not a genuine
+// reading. Enforced here so no client can bypass it.
+const odometerField = boundedNumber('Odometer reading is required', {
+  min: [0, 'Odometer reading cannot be negative'],
+  max: [9999999, 'Odometer reading looks too large — please check the value']
+});
+
+export const createJobCardSchema = z.object({
+  serviceType: serviceTypeField,
+  vehicle: idField('Vehicle is required'),
+  customer: idField('Customer is required'),
+  complaints: z.array(complaintSchema).default([]),
+  photos: z.array(photoSchema).default([]),
+  assignedMechanic: nullableId.default(null),
+  assignedAdvisor: nullableId.default(null),
+  odometerAtIntake: odometerField,
+  expectedDeliveryDate: nullableDate().default(null),
+  internalNotes: optionalString()
+});
+
+/**
+ * Everything a PUT may change. `status` transitions and the estimation are
+ * handled by the usecase, which also strips the `statusNotes` companion field
+ * before writing — it is a message for the history entry, not a column.
+ */
+export const updateJobCardSchema = z.object({
+  serviceType: serviceTypeField.optional(),
+  complaints: z.array(complaintSchema).optional(),
+  photos: z.array(photoSchema).optional(),
+  assignedMechanic: nullableId.optional(),
+  assignedAdvisor: nullableId.optional(),
+  status: statusField.optional(),
+  statusNotes: z.string().optional(),
+  odometerAtIntake: odometerField.optional(),
+  expectedDeliveryDate: nullableDate().optional(),
+  actualDeliveryDate: nullableDate().optional(),
+  internalNotes: z.string().trim().optional()
+});
+
+const estimationPartSchema = z.object({
+  inventoryItem: nullableId.default(null),
+  partName: optionalString(),
+  quantity: numberField('Part quantity must be a number').default(1),
+  unitPrice: numberField('Part price must be a number').default(0)
+});
+
+const estimationLaborSchema = z.object({
+  description: optionalString(),
+  hours: numberField('Labour hours must be a number').default(1),
+  ratePerHour: numberField('Labour rate must be a number').default(0)
+});
+
+export const estimationInputSchema = z.object({
+  parts: z.array(estimationPartSchema).optional(),
+  labor: z.array(estimationLaborSchema).optional(),
+  discount: numberField('Discount must be a number').optional(),
+  taxRate: numberField('Tax rate must be a number').optional()
+});
+
+/**
+ * Two of the JSONB payloads carry user references that `populate()` used to
+ * resolve: `estimation.parts[].inventoryItem` and `statusHistory[].changedBy`.
+ * The detail query looks those up in one `inArray` each and passes the maps
+ * here so the entries carry the same `{ _id, name }` / `{ _id, partName,
+ * partNumber }` objects they always did.
+ */
+export interface JobCardLookups {
+  usersById?: Map<string, ApiObject>;
+  inventoryById?: Map<string, ApiObject>;
+}
+
+export const jobCardToApi = (row: object, lookups: JobCardLookups = {}): ApiObject => {
+  const out = serializeRow(row);
+
+  if (lookups.usersById && Array.isArray(out.statusHistory)) {
+    out.statusHistory = (out.statusHistory as StatusHistoryEntry[]).map(entry => ({
+      ...entry,
+      changedBy: (entry.changedBy && lookups.usersById!.get(entry.changedBy)) || entry.changedBy
+    }));
+  }
+
+  const estimation = out.estimation as Estimation | undefined;
+  if (lookups.inventoryById && estimation && Array.isArray(estimation.parts)) {
+    out.estimation = {
+      ...estimation,
+      parts: estimation.parts.map(part => ({
+        ...part,
+        inventoryItem: (part.inventoryItem && lookups.inventoryById!.get(part.inventoryItem)) || part.inventoryItem
+      }))
+    };
+  }
+
+  return out;
+};
+
+/**
+ * The list shape: Mongoose selected out `estimation.parts`,
+ * `estimation.labor` and `statusHistory` (and `photos` on the vehicle history
+ * endpoint) to keep list payloads small. The totals stay.
+ */
+export const jobCardSummaryToApi = (row: object): ApiObject => {
+  const out = serializeRow(row);
+  delete out.statusHistory;
+  delete out.photos;
+  const estimation = out.estimation as Partial<Estimation> | undefined;
+  if (estimation) {
+    const { parts: _parts, labor: _labor, ...totals } = estimation;
+    out.estimation = totals;
+  }
+  return out;
+};

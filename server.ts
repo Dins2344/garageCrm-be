@@ -5,7 +5,9 @@ import logger from './utils/logger';
 import { startScheduler } from './services/cronScheduler';
 import { initTransport } from './services/emailService';
 import { initSms } from './services/smsService';
-import Admin from './models/Admin';
+import { and, count, eq } from 'drizzle-orm';
+import { db } from './config/db';
+import { admins } from './models/Admin';
 
 const log = logger.child('Server');
 
@@ -25,23 +27,24 @@ async function checkAdminSetup(): Promise<void> {
     log.error('SUPER_ADMIN_SECRET matches JWT_SECRET — a user token could be replayed as an admin token');
   }
   try {
-    const count = await Admin.countDocuments({ isActive: true });
-    if (count === 0) {
+    const [{ active }] = await db.select({ active: count() }).from(admins).where(and(eq(admins.isActive, true)));
+    if (active === 0) {
       log.warn('No active platform admin exists — create one with: npx tsx scripts/manageAdmin.ts create <email> "<Name>"');
     } else {
-      log.info('Platform admin accounts available', { active: count });
+      log.info('Platform admin accounts available', { active });
     }
   } catch (err) {
     log.warn('Could not check admin accounts at startup', { error: (err as Error).message });
   }
 }
 
-// Connect to database
-connectDB();
-
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+// The database handle must be bound before the first request: unlike
+// Mongoose, nothing buffers queries until a connection appears. `connectDB`
+// also applies pending schema migrations, so a boot that cannot migrate never
+// starts serving.
+connectDB().then(() => app.listen(PORT, () => {
   log.info('GaragePulse API Server started', {
     mode: process.env.NODE_ENV,
     port: PORT,
@@ -62,4 +65,4 @@ app.listen(PORT, () => {
     log.warn('Email transport init failed, cron will still run but emails may not send', { error: (err as Error).message });
     startScheduler();
   });
-});
+}));

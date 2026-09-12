@@ -1,90 +1,55 @@
-import mongoose, { Document, Schema, Types } from 'mongoose';
-import { FuelType, FUEL_TYPES } from '../types/domain';
+import { z } from 'zod';
+import { vehicles } from '../config/schema';
+import { FUEL_TYPES } from '../types/domain';
+import { requiredString, optionalString, numberField, idField } from '../utils/validation';
+import { serializeRow, ApiObject } from '../utils/serialize';
 
-export interface IVehicle extends Omit<Document, 'model'> {
-  _id: Types.ObjectId;
-  licensePlate: string;
-  make: string;
-  model: string;
-  year: number | null;
-  color: string;
-  fuelType: FuelType;
-  vin: string;
-  engineNumber: string;
-  currentOdometerReading: number;
-  customer: Types.ObjectId;
-  garage: Types.ObjectId;
-  serviceHistory: Types.ObjectId[];
-  isSample: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
+export { vehicles };
+export type VehicleRow = typeof vehicles.$inferSelect;
+export type NewVehicle = typeof vehicles.$inferInsert;
 
-const vehicleSchema = new Schema<IVehicle>({
-  licensePlate: {
-    type: String,
-    required: [true, 'License plate is required'],
-    uppercase: true,
-    trim: true
-  },
-  make: {
-    type: String,
-    required: [true, 'Vehicle make is required'],
-    trim: true
-  },
-  model: {
-    type: String,
-    required: [true, 'Vehicle model is required'],
-    trim: true
-  },
-  year: {
-    type: Number,
-    default: null
-  },
-  color: {
-    type: String,
-    default: ''
-  },
-  fuelType: {
-    type: String,
-    enum: FUEL_TYPES,
-    default: 'petrol'
-  },
-  vin: {
-    type: String,
-    default: ''
-  },
-  engineNumber: {
-    type: String,
-    default: ''
-  },
-  currentOdometerReading: {
-    type: Number,
-    default: 0
-  },
-  customer: {
-    type: Schema.Types.ObjectId,
-    ref: 'Customer',
-    required: true
-  },
-  garage: {
-    type: Schema.Types.ObjectId,
-    ref: 'Garage',
-    required: true
-  },
-  serviceHistory: [{
-    type: Schema.Types.ObjectId,
-    ref: 'JobCard'
-  }],
-  // See the note on Customer.isSample — display and cleanup only.
-  isSample: {
-    type: Boolean,
-    default: false
-  }
-}, {
-  timestamps: true
+const plateField = requiredString('License plate is required').toUpperCase();
+const yearField = z.preprocess(
+  v => (v === '' || v === undefined ? null : v),
+  numberField('Year must be a number').nullable()
+);
+const fuelField = z.enum(FUEL_TYPES, { error: `Fuel type must be one of: ${FUEL_TYPES.join(', ')}` });
+
+export const createVehicleSchema = z.object({
+  licensePlate: plateField,
+  make: requiredString('Vehicle make is required'),
+  model: requiredString('Vehicle model is required'),
+  year: yearField.default(null),
+  color: optionalString(),
+  fuelType: fuelField.default('petrol'),
+  vin: optionalString(),
+  engineNumber: optionalString(),
+  currentOdometerReading: numberField('Odometer must be a number').default(0),
+  customer: idField('Customer is required')
 });
 
-vehicleSchema.index({ garage: 1, licensePlate: 1 }, { unique: true });
+export const updateVehicleSchema = z.object({
+  licensePlate: plateField.optional(),
+  make: requiredString('Vehicle make is required').optional(),
+  model: requiredString('Vehicle model is required').optional(),
+  year: yearField.optional(),
+  color: z.string().trim().optional(),
+  fuelType: fuelField.optional(),
+  vin: z.string().trim().optional(),
+  engineNumber: z.string().trim().optional(),
+  currentOdometerReading: numberField('Odometer must be a number').optional(),
+  customer: idField('Customer is required').optional()
+});
 
-export default mongoose.model<IVehicle>('Vehicle', vehicleSchema);
+/**
+ * `serviceHistory` was an array of job-card ids maintained by hand on the
+ * document. It is derived from `job_cards.vehicle_id` now: a query that joins
+ * `jobCards` gets them emitted under the old key, anything else reports `[]`.
+ */
+export const vehicleToApi = (row: object): ApiObject => {
+  const out = serializeRow(row);
+  const history = out.jobCards;
+  delete out.jobCards;
+  out.serviceHistory = Array.isArray(history) ? history : [];
+  return out;
+};

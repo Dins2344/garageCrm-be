@@ -1,102 +1,70 @@
-import mongoose, { Document, Schema, Types } from 'mongoose';
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { z } from 'zod';
+import { users } from '../config/schema';
 import { Role, ROLES } from '../types/domain';
+import { requiredString, optionalString, EMAIL_PATTERN } from '../utils/validation';
+import { serializeRow, ApiObject } from '../utils/serialize';
 
-export interface IUser extends Document {
-  _id: Types.ObjectId;
-  name: string;
-  email: string;
-  phone: string;
-  password: string;
-  role: Role;
-  garage: Types.ObjectId;
-  avatar: string;
-  isActive: boolean;
-  resetPasswordToken?: string;
-  resetPasswordExpire?: Date;
-  createdAt: Date;
-  updatedAt: Date;
-  getSignedJwtToken(): string;
-  matchPassword(enteredPassword: string): Promise<boolean>;
-}
+export { users };
+export type UserRow = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
 
-const userSchema = new Schema<IUser>({
-  name: {
-    type: String,
-    required: [true, 'Name is required'],
-    trim: true,
-    maxlength: [100, 'Name cannot exceed 100 characters']
-  },
-  email: {
-    type: String,
-    required: [true, 'Email is required'],
-    unique: true,
-    lowercase: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please provide a valid email']
-  },
-  // Permissive on purpose. Country-aware validation can't live here — the
-  // schema has no access to the garage's country at validate time — and a
-  // strict rule would reject existing users on unrelated profile updates.
-  // This is a shape check only; semantic validation belongs in the usecase.
-  phone: {
-    type: String,
-    required: [true, 'Phone number is required'],
-    match: [/^\+?[0-9\s()\-]{6,20}$/, 'Please provide a valid phone number']
-  },
-  password: {
-    type: String,
-    required: [true, 'Password is required'],
-    minlength: [6, 'Password must be at least 6 characters'],
-    select: false
-  },
-  role: {
-    type: String,
-    enum: ROLES,
-    default: 'mechanic'
-  },
-  garage: {
-    type: Schema.Types.ObjectId,
-    ref: 'Garage',
-    required: true
-  },
-  avatar: {
-    type: String,
-    default: ''
-  },
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  resetPasswordToken: {
-    type: String,
-    select: false
-  },
-  resetPasswordExpire: {
-    type: Date,
-    select: false
-  }
-}, {
-  timestamps: true
+/**
+ * Mongoose's `select: false` for the password and reset-token pair, as a
+ * column list: use this in every query that returns a user to a caller. The
+ * login and reset paths read the full row explicitly.
+ */
+export const USER_PUBLIC_COLUMNS = {
+  _id: true,
+  name: true,
+  email: true,
+  phone: true,
+  role: true,
+  garageId: true,
+  avatar: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true
+} as const;
+
+export type PublicUser = Pick<UserRow, keyof typeof USER_PUBLIC_COLUMNS>;
+
+// Permissive on purpose. Country-aware validation can't live here — the
+// schema has no access to the garage's country at validate time — and a
+// strict rule would reject existing users on unrelated profile updates.
+// This is a shape check only; semantic validation belongs in the usecase.
+const PHONE_PATTERN = /^\+?[0-9\s()\-]{6,20}$/;
+
+const nameField = requiredString('Name is required').max(100, { error: 'Name cannot exceed 100 characters' });
+const emailField = requiredString('Email is required').toLowerCase().regex(EMAIL_PATTERN, { error: 'Please provide a valid email' });
+const phoneField = requiredString('Phone number is required').regex(PHONE_PATTERN, { error: 'Please provide a valid phone number' });
+export const passwordField = z.string({ error: 'Password is required' }).min(6, { error: 'Password must be at least 6 characters' });
+
+export const createUserSchema = z.object({
+  name: nameField,
+  email: emailField,
+  phone: phoneField,
+  password: passwordField,
+  role: z.enum(ROLES, { error: `Role must be one of: ${ROLES.join(', ')}` }).default('mechanic'),
+  avatar: optionalString(),
+  isActive: z.boolean().default(true)
 });
 
-// Hash password before save
-userSchema.pre('save', async function () {
-  if (!this.isModified('password')) return;
-  const salt = await bcrypt.genSalt(12);
-  this.password = await bcrypt.hash(this.password, salt);
+export const updateUserSchema = z.object({
+  name: nameField.optional(),
+  email: emailField.optional(),
+  phone: phoneField.optional(),
+  password: passwordField.optional(),
+  role: z.enum(ROLES, { error: `Role must be one of: ${ROLES.join(', ')}` }).optional(),
+  avatar: z.string().trim().optional(),
+  isActive: z.boolean().optional()
 });
 
-// Sign JWT token
-userSchema.methods.getSignedJwtToken = function (this: IUser): string {
-  return jwt.sign({ id: this._id, role: this.role }, process.env.JWT_SECRET as string, {
+/** Formerly `user.getSignedJwtToken()`. */
+export const signUserToken = (user: { _id: string; role: Role | string }): string =>
+  jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET as string, {
     expiresIn: process.env.JWT_EXPIRE
   } as jwt.SignOptions);
-};
 
-// Match password
-userSchema.methods.matchPassword = async function (this: IUser, enteredPassword: string): Promise<boolean> {
-  return await bcrypt.compare(enteredPassword, this.password);
-};
-
-export default mongoose.model<IUser>('User', userSchema);
+/** Never carries the password, whatever was selected. */
+export const userToApi = (row: object): ApiObject => serializeRow(row);

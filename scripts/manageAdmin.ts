@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import crypto from 'crypto';
-import mongoose from 'mongoose';
-import Admin from '../models/Admin';
+import { asc, eq } from 'drizzle-orm';
+import connectDB, { db, closeDB } from '../config/db';
+import { admins } from '../models/Admin';
+import { hashPassword } from '../utils/password';
 
 /**
  * Create, rotate and deactivate platform super-admins.
@@ -9,8 +11,8 @@ import Admin from '../models/Admin';
  * Admin credentials used to be environment variables with hardcoded fallbacks
  * in `usecases/adminUsecase.ts` — anyone who could read the source knew the
  * default password of any deployment that had not overridden it. They now live
- * in the `admins` collection as bcrypt hashes, and this is the only way to put
- * one there.
+ * in the `admins` table as bcrypt hashes, and this is the only way to put one
+ * there.
  *
  * There is deliberately no HTTP endpoint and no auto-seed at boot. Creating a
  * platform-wide account should require shell access to the environment, and an
@@ -23,6 +25,9 @@ import Admin from '../models/Admin';
  *   npx tsx scripts/manageAdmin.ts reset-password <email> [password]
  *   npx tsx scripts/manageAdmin.ts deactivate <email>
  *   npx tsx scripts/manageAdmin.ts activate <email>
+ *
+ * In the production image (no `tsx`, only `dist/`):
+ *   node dist/scripts/manageAdmin.js create <email> "<Full Name>"
  *
  * Omit the password and one is generated and printed once. It is not stored
  * anywhere in plaintext and cannot be recovered — only reset.
@@ -50,26 +55,29 @@ Passwords must be at least ${MIN_PASSWORD_LENGTH} characters. Omit to generate o
   process.exit(1);
 }
 
+const normalise = (email: string): string => email.toLowerCase().trim();
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (!command) usage();
 
-  const uri = process.env.MONGODB_URI;
-  if (!uri) {
-    console.error('MONGODB_URI is not set.');
+  if (!process.env.DATABASE_URL) {
+    console.error('DATABASE_URL is not set.');
     process.exit(1);
   }
-  await mongoose.connect(uri);
+  await connectDB();
 
   switch (command) {
     case 'list': {
-      const admins = await Admin.find().select('name email isActive lastLoginAt createdAt').sort({ createdAt: 1 }).lean();
-      if (admins.length === 0) {
+      const rows = await db.select({
+        email: admins.email, isActive: admins.isActive, lastLoginAt: admins.lastLoginAt
+      }).from(admins).orderBy(asc(admins.createdAt));
+      if (rows.length === 0) {
         console.log('No admins exist. Admin login will reject every attempt until one is created.');
         break;
       }
-      console.log(`${admins.length} admin(s):\n`);
-      for (const a of admins) {
+      console.log(`${rows.length} admin(s):\n`);
+      for (const a of rows) {
         const state = a.isActive ? 'active' : 'DEACTIVATED';
         const seen = a.lastLoginAt ? new Date(a.lastLoginAt).toISOString() : 'never';
         console.log(`  ${a.email.padEnd(34)} ${state.padEnd(12)} last login: ${seen}`);
@@ -81,7 +89,7 @@ async function main() {
       const [email, name, supplied] = args;
       if (!email || !name) usage();
 
-      const existing = await Admin.findOne({ email: email.toLowerCase().trim() });
+      const existing = await db.query.admins.findFirst({ columns: { _id: true }, where: eq(admins.email, normalise(email)) });
       if (existing) {
         console.error(`An admin with email ${email} already exists. Use reset-password to change it.`);
         process.exit(1);
@@ -93,8 +101,9 @@ async function main() {
         process.exit(1);
       }
 
-      // Hashed by the model's pre-save hook.
-      const admin = await Admin.create({ email, name, password });
+      const [admin] = await db.insert(admins).values({
+        email: normalise(email), name, password: await hashPassword(password)
+      }).returning();
       console.log(`Created admin ${admin.email} (${admin.name}).`);
       if (!supplied) {
         console.log(`\n  Password: ${password}\n`);
@@ -107,21 +116,20 @@ async function main() {
       const [email, supplied] = args;
       if (!email) usage();
 
-      const admin = await Admin.findOne({ email: email.toLowerCase().trim() });
-      if (!admin) {
-        console.error(`No admin with email ${email}.`);
-        process.exit(1);
-      }
-
       const password = supplied || generatePassword();
       if (password.length < MIN_PASSWORD_LENGTH) {
         console.error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
         process.exit(1);
       }
 
-      // Assign and save (not updateOne) so the pre-save hash hook runs.
-      admin.password = password;
-      await admin.save();
+      const [admin] = await db.update(admins)
+        .set({ password: await hashPassword(password) })
+        .where(eq(admins.email, normalise(email)))
+        .returning({ email: admins.email });
+      if (!admin) {
+        console.error(`No admin with email ${email}.`);
+        process.exit(1);
+      }
       console.log(`Password reset for ${admin.email}.`);
       if (!supplied) {
         console.log(`\n  Password: ${password}\n`);
@@ -137,11 +145,10 @@ async function main() {
       if (!email) usage();
 
       const isActive = command === 'activate';
-      const admin = await Admin.findOneAndUpdate(
-        { email: email.toLowerCase().trim() },
-        { $set: { isActive } },
-        { new: true }
-      );
+      const [admin] = await db.update(admins)
+        .set({ isActive })
+        .where(eq(admins.email, normalise(email)))
+        .returning({ email: admins.email });
       if (!admin) {
         console.error(`No admin with email ${email}.`);
         process.exit(1);
@@ -157,7 +164,7 @@ async function main() {
       usage();
   }
 
-  await mongoose.disconnect();
+  await closeDB();
 }
 
 main().catch(err => {

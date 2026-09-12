@@ -1,6 +1,9 @@
 import { beforeAll, afterAll, afterEach, vi } from 'vitest';
-import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { migrate } from 'drizzle-orm/pglite/migrator';
+import * as schema from '../config/schema';
+import { setDb, MIGRATIONS_FOLDER, Db } from '../config/db';
 
 // Test env — never touch real secrets/services.
 process.env.NODE_ENV = 'test';
@@ -28,19 +31,24 @@ vi.mock('../services/smsService', () => ({
   formatPhoneE164: vi.fn((phone: string) => phone)
 }));
 
-let mongod: MongoMemoryServer;
+// A real Postgres, in-process, per test file: the same migrations production
+// applies at boot run here, so tests exercise the actual constraints, foreign
+// keys and unique indexes rather than an approximation of them.
+let pglite: PGlite;
 
 beforeAll(async () => {
-  mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri());
+  pglite = new PGlite();
+  const instance = drizzle(pglite, { schema, casing: 'snake_case' });
+  await migrate(instance, { migrationsFolder: MIGRATIONS_FOLDER });
+  setDb(instance as unknown as Db);
 }, 60000);
 
 afterEach(async () => {
-  const { collections } = mongoose.connection;
-  await Promise.all(Object.values(collections).map(c => c.deleteMany({})));
+  await pglite.exec(
+    'TRUNCATE TABLE admins, app_releases, garages, users, customers, vehicles, inventory, job_cards, invoices, service_reminders CASCADE'
+  );
 });
 
 afterAll(async () => {
-  await mongoose.disconnect();
-  await mongod.stop();
+  await pglite.close();
 });

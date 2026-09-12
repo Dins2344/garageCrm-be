@@ -1,10 +1,17 @@
 import crypto from 'crypto';
-import mongoose from 'mongoose';
-import User, { IUser } from '../models/User';
-import Garage from '../models/Garage';
+import { and, eq, gt } from 'drizzle-orm';
+import { db } from '../config/db';
+import {
+  users, UserRow, PublicUser, USER_PUBLIC_COLUMNS, createUserSchema, updateUserSchema, passwordField,
+  signUserToken, userToApi
+} from '../models/User';
+import { garages, createGarageSchema } from '../models/Garage';
+import { hashPassword, comparePassword } from '../utils/password';
+import { runSchema } from '../utils/validation';
+import { newId } from '../utils/ids';
+import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
-import { Role } from '../types/domain';
 import { COUNTRIES, DEFAULT_COUNTRY, isSupportedCountry } from '../config/countries';
 import { isValidPhoneForCountry } from '../utils/phone';
 import { isValidTimezone } from '../utils/locale';
@@ -12,6 +19,11 @@ import { sendPasswordResetEmail } from '../services/emailService';
 import { seedSampleData } from './sampleDataUsecase';
 
 const log = logger.child('AuthUsecase');
+
+/** The shape every auth endpoint hands the controller: a public user with `garage` as an id. */
+export type AuthUser = ApiObject & { _id: string; role: string; garage: string };
+
+const toAuthUser = (row: PublicUser | UserRow): AuthUser => userToApi(row) as AuthUser;
 
 interface RegisterInput {
   name: string;
@@ -26,7 +38,7 @@ interface RegisterInput {
   timezone?: string;
 }
 
-export const registerNewGarage = async (userData: RegisterInput): Promise<{ user: IUser; token: string }> => {
+export const registerNewGarage = async (userData: RegisterInput): Promise<{ user: AuthUser; token: string }> => {
   const { name, email, phone, password, garageName, garagePhone, garageAddress } = userData;
 
   // Default to India so existing clients that don't send a country keep the
@@ -38,8 +50,13 @@ export const registerNewGarage = async (userData: RegisterInput): Promise<{ user
   const country = isSupportedCountry(requestedCountry) ? requestedCountry : DEFAULT_COUNTRY;
   const countryDefaults = COUNTRIES[country];
 
+  // Shape checks first (required fields, email format, password length) so a
+  // malformed signup gets the same 400 messages the schema validators used to
+  // produce, before any country logic runs.
+  const userInput = runSchema(createUserSchema, { name, email, phone, password, role: 'owner' });
+
   // Country-aware phone validation lives here, not on the schema: the User
-  // model can't see which country the garage is being created in at validate
+  // table can't see which country the garage is being created in at validate
   // time. It also restores a check India lost — the old schema regex
   // `/^[6-9]\d{9}$/` was deliberately loosened so non-Indian numbers could be
   // stored, which left nothing rejecting malformed input. This is the only
@@ -66,74 +83,73 @@ export const registerNewGarage = async (userData: RegisterInput): Promise<{ user
   }
 
   // Check if user exists
-  const existingUser = await User.findOne({ email });
+  const existingUser = await db.query.users.findFirst({ columns: { _id: true }, where: eq(users.email, userInput.email) });
   if (existingUser) {
     throw new HttpError('Email already registered', 400);
   }
 
-  // Create User first, referencing a pre-generated Garage id, then create the
-  // Garage with `owner` already set in the same call — so the two documents
-  // are never in an inconsistent state relative to each other. Previously
-  // this created the Garage first and linked `owner` afterwards in a third
-  // step; if User.create() failed in between (a validation error, or two
-  // concurrent signups racing past the duplicate-email check above and both
-  // colliding on the unique index), the Garage was already committed and
-  // left permanently ownerless. This ordering means a User.create() failure
-  // happens before anything else exists, and a Garage.create() failure rolls
-  // back the User — either both exist and are linked, or neither does.
-  const garageId = new mongoose.Types.ObjectId();
-  const user = await User.create({
-    name,
-    email,
-    phone,
-    password,
-    role: 'owner' as Role,
-    garage: garageId
+  const garageInput = runSchema(createGarageSchema, {
+    name: garageName || `${name}'s Garage`,
+    phone: garagePhone || phone,
+    address: garageAddress || {},
+    country
   });
 
-  let garage;
-  try {
-    garage = await Garage.create({
+  // One transaction: the garage is inserted first (its owner column is
+  // nullable for exactly this moment), then the user pointing at it, then the
+  // owner link. Either every row exists and they are linked, or none does —
+  // the ownerless-garage failure mode the old two-step create had is gone.
+  const garageId = newId();
+  const passwordHash = await hashPassword(userInput.password);
+
+  const user = await db.transaction(async tx => {
+    await tx.insert(garages).values({
       _id: garageId,
-      name: garageName || `${name}'s Garage`,
-      phone: garagePhone || phone,
-      address: garageAddress || {},
-      owner: user._id,
-      country,
+      ...garageInput,
       // Seeded once from the country, then owned by the garage — see the note
       // in config/countries.ts on why these must not track the table.
       settings: {
-        taxRate: countryDefaults.defaultTaxRate,
-        laborRatePerHour: countryDefaults.defaultLaborRatePerHour,
+        currency: '',
+        locale: '',
+        taxLabel: '',
         // Only stored when the country has no single zone of its own; for
         // everywhere else '' means "inherit from the country table", so a
         // later correction to that table reaches existing garages.
-        ...(timezone ? { timezone } : {})
+        timezone,
+        taxRate: countryDefaults.defaultTaxRate,
+        laborRatePerHour: countryDefaults.defaultLaborRatePerHour,
+        serviceReminderDays: 180
       }
     });
-  } catch (err) {
-    await User.findByIdAndDelete(user._id);
-    throw err;
-  }
 
-  log.info('New garage and owner registered', { garageId: garage._id, userId: user._id });
+    const [created] = await tx.insert(users).values({
+      ...userInput,
+      password: passwordHash,
+      garageId
+    }).returning();
 
-  // Deliberately NOT rolled back on failure, unlike the Garage.create above.
-  // That rollback protects an invariant — a User and Garage must both exist or
-  // neither does. This is a nicety: a signup that fails because a demo customer
-  // could not be written is far worse than an empty garage. The owner can seed
-  // nothing and still use the product.
+    await tx.update(garages).set({ ownerId: created._id }).where(eq(garages._id, garageId));
+    return created;
+  });
+
+  log.info('New garage and owner registered', { garageId, userId: user._id });
+
+  // Deliberately NOT rolled back on failure, and deliberately outside the
+  // transaction above. That transaction protects an invariant — a user and a
+  // garage must both exist or neither does. This is a nicety: a signup that
+  // fails because a demo customer could not be written is far worse than an
+  // empty garage. The owner can seed nothing and still use the product.
   try {
-    await seedSampleData({ garageId: garage._id, ownerId: user._id, country });
+    await seedSampleData({ garageId, ownerId: user._id, country });
   } catch (err) {
     log.error('Sample data seeding failed', {
-      garageId: garage._id,
+      garageId,
       error: (err as Error).message
     });
   }
 
-  const token = user.getSignedJwtToken();
-  return { user, token };
+  const token = signUserToken(user);
+  return { user: toAuthUser(user), token };
 };
 
 interface AuthenticateInput {
@@ -141,22 +157,22 @@ interface AuthenticateInput {
   password: string;
 }
 
-export const authenticateUser = async ({ email, password }: AuthenticateInput): Promise<{ user: IUser; token: string }> => {
+export const authenticateUser = async ({ email, password }: AuthenticateInput): Promise<{ user: AuthUser; token: string }> => {
   if (!email || !password) {
     throw new HttpError('Please provide email and password', 400);
   }
 
-  // Check for user. Deliberately NOT populating `garage` here — the client-side
+  // Check for user. Deliberately NOT joining `garage` here — the client-side
   // User type (web and mobile) expects garage as a plain id string, matching
   // what /auth/register already returns; populating it silently breaks any
   // string comparison against garage ids (e.g. the mobile branch switcher).
-  const user = await User.findOne({ email }).select('+password');
+  const user = await db.query.users.findFirst({ where: eq(users.email, String(email).toLowerCase()) });
   if (!user) {
     throw new HttpError('Invalid credentials', 401);
   }
 
   // Check if password matches
-  const isMatch = await user.matchPassword(password);
+  const isMatch = await comparePassword(password, user.password);
   if (!isMatch) {
     throw new HttpError('Invalid credentials', 401);
   }
@@ -168,21 +184,24 @@ export const authenticateUser = async ({ email, password }: AuthenticateInput): 
 
   log.info('User authenticated successfully', { userId: user._id, role: user.role });
 
-  const token = user.getSignedJwtToken();
-  return { user, token };
+  const token = signUserToken(user);
+  return { user: toAuthUser(user), token };
 };
 
 interface UpdateProfileInput {
   userId: string;
-  updateData: Partial<Pick<IUser, 'name' | 'phone'>>;
+  updateData: { name?: string; phone?: string };
 }
 
-export const updateUserProfile = async ({ userId, updateData }: UpdateProfileInput): Promise<IUser | null> => {
-  const user = await User.findByIdAndUpdate(userId, updateData, {
-    new: true,
-    runValidators: true
-  });
-  return user;
+export const updateUserProfile = async ({ userId, updateData }: UpdateProfileInput): Promise<ApiObject | null> => {
+  const changes = runSchema(updateUserSchema.pick({ name: true, phone: true }), updateData);
+  if (Object.keys(changes).length === 0) {
+    const current = await db.query.users.findFirst({ columns: USER_PUBLIC_COLUMNS, where: eq(users._id, userId) });
+    return current ? userToApi(current) : null;
+  }
+
+  const [user] = await db.update(users).set(changes).where(eq(users._id, userId)).returning();
+  return user ? userToApi(user) : null;
 };
 
 interface ChangePasswordInput {
@@ -192,14 +211,14 @@ interface ChangePasswordInput {
 }
 
 export const changeUserPassword = async ({ userId, currentPassword, newPassword }: ChangePasswordInput): Promise<true> => {
-  const user = await User.findById(userId).select('+password');
+  const user = await db.query.users.findFirst({ where: eq(users._id, userId) });
 
-  if (!user || !(await user.matchPassword(currentPassword))) {
+  if (!user || !(await comparePassword(currentPassword || '', user.password))) {
     throw new HttpError('Current password is incorrect', 401);
   }
 
-  user.password = newPassword;
-  await user.save();
+  const password = runSchema(passwordField, newPassword);
+  await db.update(users).set({ password: await hashPassword(password) }).where(eq(users._id, userId));
   return true;
 };
 
@@ -219,7 +238,10 @@ type ForgotPasswordStatus = 'sent' | 'staff-managed' | 'not-found';
  * can't be used to enumerate valid owner emails.
  */
 export const forgotPassword = async ({ email, frontendUrl }: ForgotPasswordInput): Promise<{ status: ForgotPasswordStatus }> => {
-  const user = await User.findOne({ email });
+  const user = await db.query.users.findFirst({
+    columns: USER_PUBLIC_COLUMNS,
+    where: eq(users.email, String(email || '').toLowerCase())
+  });
   if (!user) {
     return { status: 'not-found' };
   }
@@ -228,9 +250,10 @@ export const forgotPassword = async ({ email, frontendUrl }: ForgotPasswordInput
   }
 
   const rawToken = crypto.randomBytes(32).toString('hex');
-  user.resetPasswordToken = crypto.createHash('sha256').update(rawToken).digest('hex');
-  user.resetPasswordExpire = new Date(Date.now() + 30 * 60 * 1000);
-  await user.save();
+  await db.update(users).set({
+    resetPasswordToken: crypto.createHash('sha256').update(rawToken).digest('hex'),
+    resetPasswordExpire: new Date(Date.now() + 30 * 60 * 1000)
+  }).where(eq(users._id, user._id));
 
   await sendPasswordResetEmail({
     to: user.email,
@@ -250,19 +273,21 @@ interface ResetPasswordInput {
 export const resetPassword = async ({ token, newPassword }: ResetPasswordInput): Promise<true> => {
   const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
-  const user = await User.findOne({
-    resetPasswordToken: hashedToken,
-    resetPasswordExpire: { $gt: new Date() }
-  }).select('+resetPasswordToken +resetPasswordExpire');
+  const user = await db.query.users.findFirst({
+    columns: { _id: true },
+    where: and(eq(users.resetPasswordToken, hashedToken), gt(users.resetPasswordExpire, new Date()))
+  });
 
   if (!user) {
     throw new HttpError('This reset link is invalid or has expired.', 400);
   }
 
-  user.password = newPassword;
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpire = undefined;
-  await user.save();
+  const password = runSchema(passwordField, newPassword);
+  await db.update(users).set({
+    password: await hashPassword(password),
+    resetPasswordToken: null,
+    resetPasswordExpire: null
+  }).where(eq(users._id, user._id));
 
   log.info('Password reset successfully', { userId: user._id });
   return true;

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import app from '../app';
-import Garage from '../models/Garage';
+import { schema, findById } from './helpers/dbAccess';
 import { createGarageWithOwner, authHeader } from './helpers/factories';
 
 /**
@@ -36,7 +36,7 @@ describe('Garage settings — partial updates merge instead of replacing', () =>
       .send({ settings: { taxRate: 5 } });
     expect(partial.status).toBe(200);
 
-    const garage = await Garage.findById(owner.garageId);
+    const garage = await findById(schema.garages, owner.garageId);
     expect(garage!.settings.taxRate).toBe(5);
     // The three untouched keys must survive.
     expect(garage!.settings.currency).toBe('GBP');
@@ -58,7 +58,7 @@ describe('Garage settings — partial updates merge instead of replacing', () =>
       .send({ address: { city: 'Mumbai' } });
     expect(partial.status).toBe(200);
 
-    const garage = await Garage.findById(owner.garageId);
+    const garage = await findById(schema.garages, owner.garageId);
     expect(garage!.address.city).toBe('Mumbai');
     expect(garage!.address.street).toBe('MG Road');
     expect(garage!.address.state).toBe('MH');
@@ -74,9 +74,9 @@ describe('Garage settings — partial updates merge instead of replacing', () =>
       .send({ name: 'Renamed Garage', owner: '000000000000000000000000' });
     expect(res.status).toBe(200);
 
-    const garage = await Garage.findById(owner.garageId);
+    const garage = await findById(schema.garages, owner.garageId);
     expect(garage!.name).toBe('Renamed Garage');
-    // `owner` is not in ALLOWED_FIELDS, so it must be untouched.
-    expect(String(garage!.owner)).toBe(String(owner.userId));
+    // `owner` is not an updatable field, so it must be untouched.
+    expect(garage!.ownerId).toBe(owner.userId);
   });
 });

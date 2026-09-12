@@ -114,7 +114,7 @@ export const updateEstimation = async (req: Request, res: Response, next: NextFu
       estimationData: req.body
     });
 
-    log.info('Estimation saved', { jobCardId: id, grandTotal: jobCard.estimation?.grandTotal });
+    log.info('Estimation saved', { jobCardId: id, grandTotal: (jobCard.estimation as { grandTotal?: number } | undefined)?.grandTotal });
     res.status(200).json({ success: true, data: jobCard });
   } catch (error) {
     log.error('Failed to update estimation', { jobCardId: req.params.id, error: (error as Error).message });

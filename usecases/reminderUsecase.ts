@@ -1,107 +1,127 @@
-import { Types } from 'mongoose';
-import ServiceReminder, { IServiceReminder } from '../models/ServiceReminder';
-import Garage from '../models/Garage';
+import { and, asc, count, eq, lte } from 'drizzle-orm';
+import { db } from '../config/db';
+import { serviceReminders, createReminderSchema, reminderStatusField, reminderToApi } from '../models/ServiceReminder';
+import { garages } from '../models/Garage';
+import { vehicles } from '../models/Vehicle';
+import { customers } from '../models/Customer';
+import type { DeliveredJobCard } from './jobCardUsecase';
+import { runSchema } from '../utils/validation';
+import { pagination } from '../utils/query';
+import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 
 const log = logger.child('ReminderUsecase');
 
+const LIST_WITH = {
+  vehicle: { columns: { _id: true, licensePlate: true, make: true, model: true } },
+  customer: { columns: { _id: true, name: true, phone: true } }
+} as const;
+
 interface ListInput {
-  garageId: Types.ObjectId | string;
+  garageId: string;
   status?: string;
   page?: number | string;
   limit?: number | string;
 }
 
 export const getRemindersList = async ({ garageId, status, page = 1, limit = 20 }: ListInput) => {
-  const query: Record<string, unknown> = { garage: garageId };
-  if (status) query.status = status;
+  const paging = pagination(page, limit);
+  const where = and(
+    eq(serviceReminders.garageId, garageId),
+    status ? eq(serviceReminders.status, status) : undefined
+  );
 
-  const total = await ServiceReminder.countDocuments(query);
-  const reminders = await ServiceReminder.find(query)
-    .populate('vehicle', 'licensePlate make model')
-    .populate('customer', 'name phone')
-    .sort('nextServiceDate')
-    .skip((Number(page) - 1) * Number(limit))
-    .limit(Number(limit))
-    .lean();
+  const [{ total }] = await db.select({ total: count() }).from(serviceReminders).where(where);
+  const rows = await db.query.serviceReminders.findMany({
+    with: LIST_WITH,
+    where,
+    orderBy: [asc(serviceReminders.nextServiceDate)],
+    offset: paging.offset,
+    limit: paging.limit
+  });
 
-  return { reminders, total };
+  return { reminders: rows.map(reminderToApi), total };
 };
 
 interface UpcomingInput {
-  garageId: Types.ObjectId | string;
+  garageId: string;
   days?: number;
 }
 
-export const getUpcomingReminders = async ({ garageId, days = 30 }: UpcomingInput) => {
+export const getUpcomingReminders = async ({ garageId, days = 30 }: UpcomingInput): Promise<ApiObject[]> => {
   const now = new Date();
   const futureDate = new Date();
   futureDate.setDate(futureDate.getDate() + days);
 
-  const reminders = await ServiceReminder.find({
-    garage: garageId,
-    status: 'pending',
-    nextServiceDate: { $lte: futureDate }
-  })
-    .populate('vehicle', 'licensePlate make model')
-    .populate('customer', 'name phone')
-    .sort('nextServiceDate')
-    .limit(50)
-    .lean();
+  const rows = await db.query.serviceReminders.findMany({
+    with: LIST_WITH,
+    where: and(
+      eq(serviceReminders.garageId, garageId),
+      eq(serviceReminders.status, 'pending'),
+      lte(serviceReminders.nextServiceDate, futureDate)
+    ),
+    orderBy: [asc(serviceReminders.nextServiceDate)],
+    limit: 50
+  });
 
   // Classify as overdue or upcoming
-  return reminders.map(r => ({
-    ...r,
+  return rows.map(r => ({
+    ...reminderToApi(r),
     isOverdue: new Date(r.nextServiceDate) < now
   }));
 };
 
 interface CreateInput {
-  reminderData: Partial<IServiceReminder>;
-  garageId: Types.ObjectId | string;
+  reminderData: Record<string, unknown>;
+  garageId: string;
 }
 
-export const createReminder = async ({ reminderData, garageId }: CreateInput) => {
-  const dataWithGarage = { ...reminderData, garage: garageId };
-  const reminder = await ServiceReminder.create(dataWithGarage);
-  log.info('Service reminder created', { reminderId: reminder._id, vehicleId: reminder.vehicle });
-  return reminder;
+export const createReminder = async ({ reminderData, garageId }: CreateInput): Promise<ApiObject> => {
+  const { vehicle, customer, jobCard, ...input } = runSchema(createReminderSchema, reminderData);
+
+  // Both must belong to this garage; the foreign keys only prove they exist.
+  const [vehicleRow, customerRow] = await Promise.all([
+    db.query.vehicles.findFirst({ columns: { _id: true }, where: and(eq(vehicles._id, vehicle), eq(vehicles.garageId, garageId)) }),
+    db.query.customers.findFirst({ columns: { _id: true }, where: and(eq(customers._id, customer), eq(customers.garageId, garageId)) })
+  ]);
+  if (!vehicleRow) throw new HttpError('Vehicle not found', 404);
+  if (!customerRow) throw new HttpError('Customer not found', 404);
+
+  const [reminder] = await db.insert(serviceReminders).values({
+    ...input,
+    vehicleId: vehicle,
+    customerId: customer,
+    jobCardId: jobCard,
+    garageId
+  }).returning();
+
+  log.info('Service reminder created', { reminderId: reminder._id, vehicleId: reminder.vehicleId });
+  return reminderToApi(reminder);
 };
-
-interface DeliveredJobCard {
-  _id: Types.ObjectId;
-  vehicle: Types.ObjectId | { _id: Types.ObjectId };
-  customer: Types.ObjectId | { _id: Types.ObjectId };
-  serviceType: string;
-  jobCardNumber: string;
-}
 
 interface AutoCreateInput {
   jobCard: DeliveredJobCard;
-  garageId: Types.ObjectId | string;
+  garageId: string;
 }
 
-export const autoCreateFromDelivery = async ({ jobCard, garageId }: AutoCreateInput) => {
+export const autoCreateFromDelivery = async ({ jobCard, garageId }: AutoCreateInput): Promise<ApiObject> => {
   // Get garage settings for reminder interval
-  const garage = await Garage.findById(garageId).lean();
+  const garage = await db.query.garages.findFirst({ columns: { settings: true }, where: eq(garages._id, garageId) });
   const reminderDays = garage?.settings?.serviceReminderDays || 180; // 6 months default
 
   const nextServiceDate = new Date();
   nextServiceDate.setDate(nextServiceDate.getDate() + reminderDays);
 
-  const vehicleId = '_id' in jobCard.vehicle ? jobCard.vehicle._id : jobCard.vehicle;
-  const customerId = '_id' in jobCard.customer ? jobCard.customer._id : jobCard.customer;
-
-  const reminder = await ServiceReminder.create({
-    vehicle: vehicleId,
-    customer: customerId,
-    garage: garageId,
-    jobCard: jobCard._id,
+  const [reminder] = await db.insert(serviceReminders).values({
+    vehicleId: jobCard.vehicleId,
+    customerId: jobCard.customerId,
+    garageId,
+    jobCardId: jobCard._id,
     type: jobCard.serviceType,
     nextServiceDate,
     notes: `Auto-created after Job Card ${jobCard.jobCardNumber} delivery`
-  });
+  }).returning();
 
   log.info('Auto service reminder created', {
     reminderId: reminder._id,
@@ -109,35 +129,37 @@ export const autoCreateFromDelivery = async ({ jobCard, garageId }: AutoCreateIn
     nextServiceDate: nextServiceDate.toISOString()
   });
 
-  return reminder;
+  return reminderToApi(reminder);
 };
 
 interface UpdateStatusInput {
   reminderId: string;
-  garageId: Types.ObjectId | string;
+  garageId: string;
   status: string;
 }
 
-export const updateReminderStatus = async ({ reminderId, garageId, status }: UpdateStatusInput) => {
-  const reminder = await ServiceReminder.findOneAndUpdate(
-    { _id: reminderId, garage: garageId },
-    { status, ...(status === 'sent' ? { reminderSentAt: new Date() } : {}) },
-    { new: true }
-  );
+export const updateReminderStatus = async ({ reminderId, garageId, status }: UpdateStatusInput): Promise<ApiObject> => {
+  const nextStatus = runSchema(reminderStatusField, status);
+  const [reminder] = await db.update(serviceReminders)
+    .set({ status: nextStatus, ...(nextStatus === 'sent' ? { reminderSentAt: new Date() } : {}) })
+    .where(and(eq(serviceReminders._id, reminderId), eq(serviceReminders.garageId, garageId)))
+    .returning();
   if (!reminder) {
     throw new HttpError('Reminder not found', 404);
   }
-  return reminder;
+  return reminderToApi(reminder);
 };
 
 interface RemoveInput {
   reminderId: string;
-  garageId: Types.ObjectId | string;
+  garageId: string;
 }
 
 export const removeReminder = async ({ reminderId, garageId }: RemoveInput): Promise<true> => {
-  const reminder = await ServiceReminder.findOneAndDelete({ _id: reminderId, garage: garageId });
-  if (!reminder) {
+  const deleted = await db.delete(serviceReminders)
+    .where(and(eq(serviceReminders._id, reminderId), eq(serviceReminders.garageId, garageId)))
+    .returning({ _id: serviceReminders._id });
+  if (deleted.length === 0) {
     throw new HttpError('Reminder not found', 404);
   }
   return true;
