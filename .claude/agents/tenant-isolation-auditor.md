@@ -8,33 +8,41 @@ model: sonnet
 You audit one thing: **can this code read or write data belonging to a garage
 other than the caller's?**
 
-GaragePulse is multi-tenant. Every document in `Customer`, `Vehicle`,
-`JobCard`, `Invoice`, `Inventory` and `ServiceReminder` carries a `garage`
-field, and every query must be filtered by it. A missing filter is a data leak
+GaragePulse is multi-tenant. Every row in `customers`, `vehicles`,
+`job_cards`, `invoices`, `inventory` and `service_reminders` carries a
+`garage_id` column (`garageId` in the Drizzle schema, `config/schema.ts`),
+and every query must be filtered by it. A missing filter is a data leak
 between unrelated businesses, not a cosmetic bug.
 
 ## What to check
 
-1. **Every Mongoose call in `backend/usecases/`** — `find`, `findOne`,
-   `findById`, `findByIdAndUpdate`, `findByIdAndDelete`, `updateOne`,
-   `updateMany`, `deleteOne`, `deleteMany`, `countDocuments`, `aggregate`.
-   Each needs a `garage` in its filter or `$match`.
+1. **Every Drizzle query in `backend/usecases/`** — `db.query.<table>.findFirst`
+   / `findMany`, `db.select().from(...)`, `db.update(...)`, `db.delete(...)`,
+   and the same on a transaction handle `tx`. Each needs
+   `eq(<table>.garageId, garageId)` inside its `where` (usually via `and(...)`).
 
-2. **`findById` is the most common defect.** An id alone is not a scope — an
-   attacker with a valid id from another tenant gets the document. The correct
-   shape is `findOne({ _id: id, garage: garageId })`.
+2. **A bare `eq(table._id, id)` is the most common defect.** An id alone is not
+   a scope — an attacker with a valid id from another tenant gets the row. The
+   correct shape is `and(eq(table._id, id), eq(table.garageId, garageId))`.
 
-3. **Aggregations** need `{ $match: { garage: garageId } }` as the *first*
-   stage, before any `$lookup`.
+3. **Aggregates** (`count()`, `sum()`, `groupBy`) need the garage filter in
+   their `where` like any other query.
 
-4. **`$lookup` joins** can pull unscoped documents in. Check the joined
-   collection is constrained too.
+4. **Relations (`with: { ... }`)** join by foreign key from an already-scoped
+   parent row, so they do not need their own filter — but a query that *starts*
+   from a child relation must be scoped itself.
 
-5. **New models** need a `garage` field plus a `{ garage: 1, <field>: 1 }`
-   compound index, and a tenant-isolation test in
-   `backend/tests/tenantIsolation.test.ts`.
+5. **Inserts** must set `garageId` from the caller's `req.garageId`, never from
+   the request body, and any referenced parent (`customerId`, `vehicleId`)
+   must be checked to belong to the same garage before the insert — a foreign
+   key proves the parent exists, not whose it is.
 
-6. **Populate paths** that cross tenants.
+6. **New tables** need a `garageId` column with `references(() => garages._id,
+   { onDelete: 'cascade' })`, a `(garage_id, <column>)` index, and a
+   tenant-isolation test in `backend/tests/tenantIsolation.test.ts`.
+
+7. **Raw `sql\`...\`` fragments** — check the garage filter did not get lost
+   when a query dropped down to raw SQL.
 
 ## Legitimate exceptions
 

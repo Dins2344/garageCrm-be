@@ -9,9 +9,13 @@ one report covers everything.
 ```bash
 npx tsc --noEmit
 npm test
+npx tsx scripts/checkSwagger.ts
 ```
 
-There is no lint script in this repo. Tests use `mongodb-memory-server` and need no running database.
+There is no lint script in this repo. Tests run on an in-process PGlite and
+need no running database. `checkSwagger` is the API-contract check: every
+route registered in `app.ts` must be documented, and both clients integrate
+against that spec.
 
 ## Lock file matches CI
 

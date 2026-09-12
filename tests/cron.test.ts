@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Types } from 'mongoose';
-import Garage from '../models/Garage';
-import Customer from '../models/Customer';
-import Vehicle from '../models/Vehicle';
-import ServiceReminder from '../models/ServiceReminder';
-import User from '../models/User';
+import { eq, sql } from 'drizzle-orm';
+import { db, schema, findById } from './helpers/dbAccess';
+import { DEFAULT_GARAGE_SETTINGS } from '../config/schema';
 import { processServiceReminders } from '../services/cronScheduler';
 import { sendServiceReminder } from '../services/emailService';
 import { sendServiceReminderSms } from '../services/smsService';
@@ -25,39 +22,38 @@ const sendSmsMock = vi.mocked(sendServiceReminderSms);
 
 /** Creates a garage in the given country plus one due, pending reminder. */
 async function seedDueReminder(country: string, timezone?: string) {
-  const owner = new Types.ObjectId();
-  const garage = await Garage.create({
+  const [garage] = await db.insert(schema.garages).values({
     name: `Garage ${country}${timezone ? `-${timezone}` : ''}`,
     phone: '9876543210',
-    owner,
     country,
-    ...(timezone ? { settings: { timezone } } : {})
-  });
+    ...(timezone ? { settings: { ...DEFAULT_GARAGE_SETTINGS, timezone } } : {})
+  }).returning();
 
-  await User.create({
+  const [owner] = await db.insert(schema.users).values({
     name: 'Owner', email: `owner-${garage._id}@example.com`,
-    password: 'password123', phone: '9876543210', role: 'owner', garage: garage._id
-  });
+    password: 'password123', phone: '9876543210', role: 'owner', garageId: garage._id
+  }).returning();
+  await db.update(schema.garages).set({ ownerId: owner._id }).where(eq(schema.garages._id, garage._id));
 
-  const customer = await Customer.create({
+  const [customer] = await db.insert(schema.customers).values({
     name: 'Test Customer', phone: `98${String(Date.now()).slice(-8)}`,
-    email: 'customer@example.com', garage: garage._id
-  });
+    email: 'customer@example.com', garageId: garage._id
+  }).returning();
 
-  const vehicle = await Vehicle.create({
+  const [vehicle] = await db.insert(schema.vehicles).values({
     licensePlate: `KL${String(Date.now()).slice(-6)}`,
-    make: 'Maruti', model: 'Swift', customer: customer._id, garage: garage._id
-  });
+    make: 'Maruti', model: 'Swift', customerId: customer._id, garageId: garage._id
+  }).returning();
 
   // A fixed date in the past, NOT one relative to the real clock: these tests
   // inject `now` (including dates in January to exercise DST), and a reminder
   // seeded relative to today would fall outside the "due within 7 days" window
   // whenever the injected clock is earlier than the real one.
-  const reminder = await ServiceReminder.create({
-    vehicle: vehicle._id, customer: customer._id, garage: garage._id,
+  const [reminder] = await db.insert(schema.serviceReminders).values({
+    vehicleId: vehicle._id, customerId: customer._id, garageId: garage._id,
     nextServiceDate: new Date('2024-01-01T00:00:00Z'),
     type: 'periodic_service', status: 'pending'
-  });
+  }).returning();
 
   return { garage, reminder, customer };
 }
@@ -95,7 +91,7 @@ describe('reminder cron — per-garage local 09:00 gate', () => {
     });
     expect(janOn).toMatchObject({ heldForLocalTime: 0, emailSent: 1 });
 
-    await ServiceReminder.updateMany({}, { status: 'pending', lastAttemptAt: null });
+    await db.update(schema.serviceReminders).set({ status: 'pending', lastAttemptAt: null });
     sendEmailMock.mockClear();
 
     // July: London is on BST, so 09:00 UTC is already 10:00 local — too late.
@@ -119,7 +115,7 @@ describe('reminder cron — per-garage local 09:00 gate', () => {
       respectLocalHour: true, now: new Date('2026-01-14T14:00:00Z')
     })).toMatchObject({ heldForLocalTime: 0, emailSent: 1 });
 
-    await ServiceReminder.updateMany({}, { status: 'pending', lastAttemptAt: null });
+    await db.update(schema.serviceReminders).set({ status: 'pending', lastAttemptAt: null });
     sendEmailMock.mockClear();
 
     // EDT (UTC-4) in July: the same 14:00 UTC is 10:00 local.
@@ -149,11 +145,11 @@ describe('reminder cron — per-garage local 09:00 gate', () => {
     expect(londonHour).toMatchObject({ processed: 1, emailSent: 1, heldForLocalTime: 0 });
   });
 
-  it('falls back to a sane zone when the garage has no country at all', async () => {
-    // Documents written before the country field existed have no key —
-    // resolveGarageLocale must still yield India's timezone.
+  it('falls back to a sane zone when the garage was never given a country', async () => {
+    // Rows migrated from documents that pre-date the country field carry the
+    // column default — resolveGarageLocale must still yield India's timezone.
     const { garage } = await seedDueReminder('IN');
-    await Garage.collection.updateOne({ _id: garage._id }, { $unset: { country: '' } });
+    await db.update(schema.garages).set({ country: sql`default` }).where(eq(schema.garages._id, garage._id));
 
     expect(await processServiceReminders({
       respectLocalHour: true, now: new Date('2026-08-14T03:30:00Z')
@@ -196,7 +192,7 @@ describe('reminder cron — the gate lines up with the real schedule', () => {
     await seedDueReminder('GB');
     expect(await firstSendingTick('2026-01-14')).toBe('2026-01-14T09:00:00.000Z');  // GMT
 
-    await ServiceReminder.updateMany({}, { status: 'pending', lastAttemptAt: null });
+    await db.update(schema.serviceReminders).set({ status: 'pending', lastAttemptAt: null });
     sendEmailMock.mockClear();
     expect(await firstSendingTick('2026-07-14')).toBe('2026-07-14T08:00:00.000Z');  // BST
   });
@@ -233,7 +229,7 @@ describe('reminder cron — idempotence on re-entry', () => {
     // forever — without the cooldown, an hourly job would append a failure
     // note 24 times a day and grow the notes field without bound.
     const { reminder, customer } = await seedDueReminder('IN');
-    await Customer.findByIdAndUpdate(customer._id, { $unset: { email: '' }, phone: '' });
+    await db.update(schema.customers).set({ email: '', phone: '' }).where(eq(schema.customers._id, customer._id));
     sendEmailMock.mockResolvedValue({ skipped: true, reason: 'no_email' } as never);
     sendSmsMock.mockResolvedValue({ skipped: true, reason: 'no_phone' } as never);
 
@@ -241,7 +237,7 @@ describe('reminder cron — idempotence on re-entry', () => {
       respectLocalHour: true, now: new Date('2026-08-14T03:30:00Z')
     });
     expect(first).toMatchObject({ skipped: 1 });
-    const afterFirst = await ServiceReminder.findById(reminder._id);
+    const afterFirst = await findById(schema.serviceReminders, reminder._id);
     expect(afterFirst!.status).toBe('pending');
     expect(afterFirst!.lastAttemptAt).toBeTruthy();
     const notesAfterFirst = afterFirst!.notes;
@@ -251,7 +247,7 @@ describe('reminder cron — idempotence on re-entry', () => {
       respectLocalHour: true, now: new Date('2026-08-14T03:50:00Z')
     });
     expect(second).toMatchObject({ skipped: 0, heldForLocalTime: 1 });
-    expect((await ServiceReminder.findById(reminder._id))!.notes).toBe(notesAfterFirst);
+    expect((await findById(schema.serviceReminders, reminder._id))!.notes).toBe(notesAfterFirst);
 
     // The next day's 09:00 is past the cooldown, so it retries.
     const nextDay = await processServiceReminders({

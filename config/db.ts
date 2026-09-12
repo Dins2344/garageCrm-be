@@ -1,45 +1,104 @@
-import mongoose from 'mongoose';
+import fs from 'fs';
+import path from 'path';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { PgDatabase, PgQueryResultHKT, PgTransaction } from 'drizzle-orm/pg-core';
+import { ExtractTablesWithRelations } from 'drizzle-orm';
+import * as schema from './schema';
 import logger from '../utils/logger';
 
 const log = logger.child('Database');
 
+/**
+ * The database handle every usecase imports.
+ *
+ * Typed against the generic `PgDatabase` rather than the node-postgres
+ * flavour so the same code runs on a `pg.Pool` in production and on an
+ * in-process PGlite in tests. `tests/setup.ts` calls `setDb()` with the PGlite
+ * instance before any test file loads; `server.ts` calls `connectDB()` before
+ * `app.listen()`. Either way the handle is bound before the first query.
+ *
+ * `db` itself is a thin proxy onto whichever instance is current, so usecases
+ * write `db.select()` and never have to ask for the connection.
+ */
+export type Db = PgDatabase<PgQueryResultHKT, typeof schema, ExtractTablesWithRelations<typeof schema>>;
+export type Tx = PgTransaction<PgQueryResultHKT, typeof schema, ExtractTablesWithRelations<typeof schema>>;
+/** Accepts either, so a helper can run standalone or inside a caller's transaction. */
+export type DbOrTx = Db | Tx;
+
+let current: Db | null = null;
+let pool: Pool | null = null;
+
+export const setDb = (instance: Db): void => {
+  current = instance;
+};
+
+export const getDb = (): Db => {
+  if (!current) {
+    throw new Error('Database not initialised — connectDB() (or the test harness) has not run');
+  }
+  return current;
+};
+
+export const db: Db = new Proxy({} as Db, {
+  get(_target, prop) {
+    const instance = getDb() as unknown as Record<string | symbol, unknown>;
+    const value = instance[prop];
+    return typeof value === 'function' ? (value as Function).bind(instance) : value;
+  }
+});
+
+/**
+ * Where the SQL migrations live, from either layout: `config/db.ts` in source
+ * (`../drizzle`) or `dist/config/db.js` in the image (`../../drizzle`, since
+ * the Dockerfile copies `drizzle/` beside `dist/`, not inside it).
+ */
+export const MIGRATIONS_FOLDER = [
+  path.join(__dirname, '..', 'drizzle'),
+  path.join(__dirname, '..', '..', 'drizzle')
+].find(candidate => fs.existsSync(path.join(candidate, 'meta', '_journal.json')))
+  ?? path.join(__dirname, '..', 'drizzle');
+
 const connectDB = async (): Promise<void> => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI as string);
-    log.info('MongoDB connection established', { host: conn.connection.host });
-    await verifyIndexes();
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error('DATABASE_URL is not set');
+    }
+
+    // Neon's free tier caps connections; the pooled connection string plus a
+    // small local pool keeps a single instance well inside it.
+    pool = new Pool({ connectionString, max: 5 });
+    const instance = drizzle(pool, { schema, casing: 'snake_case' });
+
+    // Schema migrations apply at boot. Single instance, so there is no race,
+    // and a migration that cannot apply fails the start instead of leaving a
+    // constraint silently unenforced.
+    await migrate(instance, { migrationsFolder: MIGRATIONS_FOLDER });
+
+    setDb(instance);
+    log.info('PostgreSQL connection established', { host: new URL(connectionString).hostname });
   } catch (error) {
-    log.error('MongoDB connection failed', { error: (error as Error).message });
+    log.error('PostgreSQL connection failed', { error: (error as Error).message });
     process.exit(1);
   }
 };
 
-/**
- * Mongoose builds each model's indexes in the background on connect and,
- * by default, silently swallows any failure — there's no console output,
- * no crash, nothing. If a unique index can't be built because data already
- * violates it (this exact thing happened to Garage's {owner, name} index —
- * a pre-existing duplicate branch name meant the index never built and the
- * "unique" constraint silently never applied to any owner, not just that
- * one), the schema's uniqueness guarantee is just gone with zero signal.
- * This makes that failure loud instead: explicitly (re)builds every
- * registered model's indexes on every boot and logs an error — including
- * which documents are blocking it — for anything that doesn't build clean.
- */
-const verifyIndexes = async (): Promise<void> => {
-  const results = await Promise.allSettled(
-    Object.values(mongoose.connection.models).map(model => model.createIndexes())
-  );
+/** Health-check probe: true when a round trip succeeds. */
+export const pingDb = async (): Promise<boolean> => {
+  try {
+    await getDb().execute('select 1');
+    return true;
+  } catch {
+    return false;
+  }
+};
 
-  results.forEach((result, i) => {
-    const modelName = Object.keys(mongoose.connection.models)[i];
-    if (result.status === 'rejected') {
-      log.error('Index build failed — a schema constraint (e.g. a unique index) is NOT being enforced', {
-        model: modelName,
-        error: (result.reason as Error).message
-      });
-    }
-  });
+export const closeDB = async (): Promise<void> => {
+  await pool?.end();
+  pool = null;
+  current = null;
 };
 
 export default connectDB;

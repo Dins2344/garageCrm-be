@@ -1,8 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import * as garageUsecase from '../usecases/garageUsecase';
 import * as sampleDataUsecase from '../usecases/sampleDataUsecase';
-import { resolveGarageLocale } from '../utils/locale';
-import type { IGarage } from '../models/Garage';
+import { resolveGarageLocale, LocaleSource } from '../utils/locale';
 import logger from '../utils/logger';
 const log = logger.child('GarageController');
 
@@ -10,9 +9,9 @@ const log = logger.child('GarageController');
  * Attach the resolved locale to a garage payload so clients never need to
  * carry a copy of the country table — they just render what's handed to them.
  */
-const withLocale = (garage: IGarage) => ({
-  ...garage.toObject(),
-  locale: resolveGarageLocale(garage)
+const withLocale = (garage: Record<string, unknown>) => ({
+  ...garage,
+  locale: resolveGarageLocale(garage as LocaleSource)
 });
 
 // @desc    Get garage info for current user's active garage

@@ -1,6 +1,7 @@
 import cron from 'node-cron';
-import { Types } from 'mongoose';
-import ServiceReminder from '../models/ServiceReminder';
+import { and, eq, inArray, lt, lte } from 'drizzle-orm';
+import { db } from '../config/db';
+import { serviceReminders } from '../models/ServiceReminder';
 import { sendServiceReminder } from '../services/emailService';
 import { sendServiceReminderSms, isSmsConfigured } from '../services/smsService';
 import logger from '../utils/logger';
@@ -19,7 +20,7 @@ const REMINDER_SEND_HOUR = 9;
 const REATTEMPT_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
 interface DueReminder {
-  _id: Types.ObjectId;
+  _id: string;
   customer?: { name?: string; email?: string; phone?: string } | null;
   vehicle?: { licensePlate?: string; make?: string; model?: string } | null;
   garage?: (LocaleSource & { name?: string; phone?: string }) | null;
@@ -76,14 +77,14 @@ export const processServiceReminders = async (
     sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
 
     // Find all pending reminders that are due within 7 days (or already overdue)
-    const dueReminders = await ServiceReminder.find({
-      status: 'pending',
-      nextServiceDate: { $lte: sevenDaysFromNow }
-    })
-      .populate('vehicle', 'licensePlate make model')
-      .populate('customer', 'name phone email')
-      .populate('garage')
-      .lean<DueReminder[]>();
+    const dueReminders: DueReminder[] = await db.query.serviceReminders.findMany({
+      where: and(eq(serviceReminders.status, 'pending'), lte(serviceReminders.nextServiceDate, sevenDaysFromNow)),
+      with: {
+        vehicle: { columns: { _id: true, licensePlate: true, make: true, model: true } },
+        customer: { columns: { _id: true, name: true, phone: true, email: true } },
+        garage: true
+      }
+    });
 
     if (dueReminders.length === 0) {
       log.info('Cron: No pending reminders found');
@@ -174,12 +175,12 @@ export const processServiceReminders = async (
 
         // ── Update reminder status ──
         if (anySent) {
-          await ServiceReminder.findByIdAndUpdate(reminder._id, {
+          await db.update(serviceReminders).set({
             status: 'sent',
             reminderSentAt: now,
             lastAttemptAt: now,
             notes: (reminder.notes || '') + notesAppend
-          });
+          }).where(eq(serviceReminders._id, reminder._id));
 
           log.info('Cron: Reminder sent', {
             reminderId: reminder._id,
@@ -191,10 +192,10 @@ export const processServiceReminders = async (
         } else {
           // Neither email nor SMS succeeded — keep as pending for retry
           skipped++;
-          await ServiceReminder.findByIdAndUpdate(reminder._id, {
+          await db.update(serviceReminders).set({
             lastAttemptAt: now,
             notes: (reminder.notes || '') + notesAppend
-          });
+          }).where(eq(serviceReminders._id, reminder._id));
         }
       } catch (err) {
         failed++;
@@ -203,10 +204,10 @@ export const processServiceReminders = async (
           error: (err as Error).message
         });
 
-        await ServiceReminder.findByIdAndUpdate(reminder._id, {
+        await db.update(serviceReminders).set({
           lastAttemptAt: now,
           notes: (reminder.notes || '') + `\n[Cron Error] ${now.toISOString()}: ${(err as Error).message}`
-        });
+        }).where(eq(serviceReminders._id, reminder._id));
       }
     }
 
@@ -241,13 +242,12 @@ export const cleanupOldReminders = async (): Promise<{ deleted: number } | Proce
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-    const result = await ServiceReminder.deleteMany({
-      status: { $in: ['completed', 'dismissed'] },
-      updatedAt: { $lt: ninetyDaysAgo }
-    });
+    const deleted = await db.delete(serviceReminders)
+      .where(and(inArray(serviceReminders.status, ['completed', 'dismissed']), lt(serviceReminders.updatedAt, ninetyDaysAgo)))
+      .returning({ _id: serviceReminders._id });
 
-    log.info('Cron: Old reminder cleanup complete', { deleted: result.deletedCount });
-    return { deleted: result.deletedCount };
+    log.info('Cron: Old reminder cleanup complete', { deleted: deleted.length });
+    return { deleted: deleted.length };
   } catch (err) {
     log.error('Cron: Cleanup error', { error: (err as Error).message });
     return { error: (err as Error).message };

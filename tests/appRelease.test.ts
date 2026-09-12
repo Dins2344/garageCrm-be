@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import app from '../app';
-import AppRelease from '../models/AppRelease';
+import { eq } from 'drizzle-orm';
+import { db, schema, countRows } from './helpers/dbAccess';
 import { loginAsSuperAdmin, adminHeader, ADMIN_EMAIL } from './helpers/factories';
 
 /**
@@ -10,8 +11,8 @@ import { loginAsSuperAdmin, adminHeader, ADMIN_EMAIL } from './helpers/factories
  * these tests are about the cases where it must NOT block.
  */
 
-const seed = (over: Partial<Record<string, unknown>> = {}) =>
-  AppRelease.create({
+const seed = (over: Partial<typeof schema.appReleases.$inferInsert> = {}) =>
+  db.insert(schema.appReleases).values({
     platform: 'android',
     latestVersion: '1.1.0',
     minSupportedVersion: '',
@@ -57,7 +58,7 @@ describe('GET /api/meta/app-update', () => {
     const behind = await check('1.0.9');
     expect(behind.body.data.updateAvailable).toBe(true);
 
-    await AppRelease.deleteMany({});
+    await db.delete(schema.appReleases);
     await seed({ latestVersion: '1.0.9' });
     const ahead = await check('1.0.10');
     expect(ahead.body.data.updateAvailable).toBe(false);
@@ -169,7 +170,7 @@ describe('admin app-release endpoints', () => {
     await request(app).put('/api/admin/app-release').set(adminHeader(token))
       .send({ ...validBody, latestVersion: '1.2.0' });
 
-    expect(await AppRelease.countDocuments({ platform: 'android' })).toBe(1);
+    expect(await countRows(schema.appReleases, eq(schema.appReleases.platform, 'android'))).toBe(1);
   });
 
   /**
@@ -187,7 +188,7 @@ describe('admin app-release endpoints', () => {
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/block every user/i);
 
-    const stored = await AppRelease.findOne({ platform: 'android' }).lean();
+    const stored = await db.query.appReleases.findFirst({ where: eq(schema.appReleases.platform, 'android') });
     expect(stored?.minSupportedVersion).toBe('');
   });
 
@@ -221,7 +222,7 @@ describe('admin app-release endpoints', () => {
       .send({ ...validBody, minSupportedVersion: '' });
 
     expect(res.status).toBe(200);
-    expect((await AppRelease.findOne({ platform: 'android' }).lean())?.minSupportedVersion).toBe('');
+    expect((await db.query.appReleases.findFirst({ where: eq(schema.appReleases.platform, 'android') }))?.minSupportedVersion).toBe('');
   });
 
   it('records which admin made the change', async () => {
@@ -229,7 +230,7 @@ describe('admin app-release endpoints', () => {
 
     await request(app).put('/api/admin/app-release').set(adminHeader(token)).send(validBody);
 
-    const stored = await AppRelease.findOne({ platform: 'android' }).lean();
+    const stored = await db.query.appReleases.findFirst({ where: eq(schema.appReleases.platform, 'android') });
     expect(stored?.updatedBy).toBe(ADMIN_EMAIL);
   });
 });

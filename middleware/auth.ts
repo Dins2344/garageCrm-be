@@ -1,8 +1,10 @@
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
-import { Types } from 'mongoose';
-import User from '../models/User';
-import Garage from '../models/Garage';
+import { and, eq } from 'drizzle-orm';
+import { db } from '../config/db';
+import { users, USER_PUBLIC_COLUMNS } from '../models/User';
+import { garages } from '../models/Garage';
+import { isObjectIdHex } from '../utils/ids';
 import logger from '../utils/logger';
 import { Role } from '../types/domain';
 import { AuthenticatedUser } from '../types/express';
@@ -20,21 +22,24 @@ interface AccessTokenPayload {
 const resolveGarageId = async (
   user: AuthenticatedUser,
   garageIdHeader: string | string[] | undefined
-): Promise<Types.ObjectId | 'invalid' | 'forbidden'> => {
+): Promise<string | 'invalid' | 'forbidden'> => {
   if (user.role !== 'owner' || !garageIdHeader) {
     return user.garage._id;
   }
 
   const requestedId = Array.isArray(garageIdHeader) ? garageIdHeader[0] : garageIdHeader;
-  if (!Types.ObjectId.isValid(requestedId)) {
+  if (!isObjectIdHex(requestedId)) {
     return 'invalid';
   }
 
-  const owned = await Garage.exists({ _id: requestedId, owner: user._id });
+  const owned = await db.query.garages.findFirst({
+    columns: { _id: true },
+    where: and(eq(garages._id, requestedId), eq(garages.ownerId, user._id))
+  });
   if (!owned) {
     return 'forbidden';
   }
-  return new Types.ObjectId(requestedId);
+  return requestedId;
 };
 
 // Protect routes -- require authentication
@@ -58,7 +63,13 @@ export const protect = async (req: Request, res: Response, next: NextFunction): 
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as AccessTokenPayload;
-    const user = await User.findById(decoded.id).populate('garage');
+    const user = isObjectIdHex(decoded.id)
+      ? await db.query.users.findFirst({
+          columns: USER_PUBLIC_COLUMNS,
+          where: eq(users._id, decoded.id),
+          with: { garage: true }
+        })
+      : undefined;
 
     if (!user) {
       log.warn('Token valid but user not found in database', { userId: decoded.id });
@@ -78,7 +89,7 @@ export const protect = async (req: Request, res: Response, next: NextFunction): 
       return;
     }
 
-    req.user = user as unknown as AuthenticatedUser;
+    req.user = user as AuthenticatedUser;
 
     const resolvedGarageId = await resolveGarageId(req.user, req.headers['x-garage-id']);
     if (resolvedGarageId === 'invalid') {
@@ -105,7 +116,7 @@ export const protect = async (req: Request, res: Response, next: NextFunction): 
 // Role-based authorization
 export const authorize = (...roles: Role[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (!req.user || !roles.includes(req.user.role)) {
+    if (!req.user || !roles.includes(req.user.role as Role)) {
       log.warn('Authorization denied - insufficient role', {
         userId: req.user?._id,
         userRole: req.user?.role,

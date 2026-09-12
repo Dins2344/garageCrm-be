@@ -26,8 +26,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-# Copy compiled output from the build stage
+# Copy compiled output from the build stage, plus the SQL migrations that
+# config/db.ts applies at boot (resolved as dist/config/../drizzle).
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/drizzle ./drizzle
 
 # Create logs directory with proper permissions
 RUN mkdir -p logs uploads && chown -R garagepulse:garagepulse /app

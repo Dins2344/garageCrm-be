@@ -1,12 +1,13 @@
-import AppRelease, { IAppRelease } from '../models/AppRelease';
+import { eq } from 'drizzle-orm';
+import { db } from '../config/db';
+import { appReleases, appReleaseSchema, appReleaseToApi, PLATFORMS, Platform } from '../models/AppRelease';
 import { compareVersions, isOlderThan, parseVersion } from '../utils/semver';
+import { runSchema } from '../utils/validation';
+import { ApiObject } from '../utils/serialize';
 import { HttpError } from '../utils/httpError';
 import logger from '../utils/logger';
 
 const log = logger.child('AppReleaseUsecase');
-
-const PLATFORMS = ['android', 'ios'] as const;
-type Platform = (typeof PLATFORMS)[number];
 
 const isPlatform = (v: string): v is Platform => (PLATFORMS as readonly string[]).includes(v);
 
@@ -70,7 +71,7 @@ export const getUpdateDecision = async ({ platform, version }: DecisionInput): P
     return noUpdate(version);
   }
 
-  const policy = await AppRelease.findOne({ platform }).lean<IAppRelease | null>();
+  const policy = await db.query.appReleases.findFirst({ where: eq(appReleases.platform, platform) });
   if (!policy) {
     return noUpdate(version);
   }
@@ -107,11 +108,12 @@ export const getUpdateDecision = async ({ platform, version }: DecisionInput): P
  * `null` is not a 404: "no policy yet" is a normal state that the form has to
  * render and create from.
  */
-export const getReleasePolicy = async (platform: string) => {
+export const getReleasePolicy = async (platform: string): Promise<ApiObject | null> => {
   if (!isPlatform(platform)) {
     throw new HttpError('Unknown platform', 400);
   }
-  return AppRelease.findOne({ platform }).lean<IAppRelease | null>();
+  const policy = await db.query.appReleases.findFirst({ where: eq(appReleases.platform, platform) });
+  return policy ? appReleaseToApi(policy) : null;
 };
 
 interface SaveInput {
@@ -125,7 +127,7 @@ interface SaveInput {
   updatedBy: string;
 }
 
-export const saveReleasePolicy = async (input: SaveInput) => {
+export const saveReleasePolicy = async (input: SaveInput): Promise<ApiObject> => {
   const {
     platform, latestVersion, minSupportedVersion, storeUrl,
     updateMessage, blockingMessage, enabled, updatedBy
@@ -164,22 +166,21 @@ export const saveReleasePolicy = async (input: SaveInput) => {
     throw new HttpError('Enabled must be true or false', 400);
   }
 
+  const values = runSchema(appReleaseSchema, {
+    platform, latestVersion, minSupportedVersion, storeUrl,
+    updateMessage, blockingMessage, enabled, updatedBy
+  });
+
   /**
-   * `upsert` with a full `$set`, matching the PUT semantics: the admin's form
-   * owns every field. A partial update on a document whose most dangerous
+   * Upsert with every column set, matching the PUT semantics: the admin's
+   * form owns every field. A partial update on a row whose most dangerous
    * field is `minSupportedVersion` invites "the field I omitted kept its old
    * value".
    */
-  const saved = await AppRelease.findOneAndUpdate(
-    { platform },
-    {
-      $set: {
-        latestVersion, minSupportedVersion, storeUrl,
-        updateMessage, blockingMessage, enabled, updatedBy
-      }
-    },
-    { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
-  ).lean<IAppRelease>();
+  const { platform: _platform, ...columns } = values;
+  const [saved] = await db.insert(appReleases).values(values)
+    .onConflictDoUpdate({ target: appReleases.platform, set: columns })
+    .returning();
 
   // `warn`, not `info`: a platform-wide change that affects every device in
   // the field belongs beside the delete endpoints in the audit trail.
@@ -187,5 +188,5 @@ export const saveReleasePolicy = async (input: SaveInput) => {
     admin: updatedBy, platform, latestVersion, minSupportedVersion, enabled
   });
 
-  return saved;
+  return appReleaseToApi(saved);
 };

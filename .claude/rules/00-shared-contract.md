@@ -18,7 +18,7 @@
 
 | Repository | Stack | Deploys as |
 | --- | --- | --- |
-| `garageCrm-be` (backend) | Node 20 · Express 5 · Mongoose 9 · TypeScript | Docker image on EC2 |
+| `garageCrm-be` (backend) | Node 20 · Express 5 · PostgreSQL (Drizzle) · TypeScript | Docker image on EC2 |
 | `garageCrm-fe` (frontend) | React 19 · Vite · Tailwind CSS 4 · TypeScript | Docker image (Nginx) |
 | `garageCrm-app` (mobile) | React Native 0.81 · Expo 54 · TypeScript | Play Store / EAS build |
 

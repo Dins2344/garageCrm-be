@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import * as authUsecase from '../usecases/authUsecase';
-import { IUser } from '../models/User';
-import Garage from '../models/Garage';
+import * as garageUsecase from '../usecases/garageUsecase';
+import { serializeRow } from '../utils/serialize';
 import { resolveGarageLocale } from '../utils/locale';
 import logger from '../utils/logger';
 const log = logger.child('AuthController');
@@ -12,10 +12,12 @@ const log = logger.child('AuthController');
 // path a NON-OWNER has to the garage's locale: the mobile GarageContext only
 // calls listBranches(), and only for owners, so staff would otherwise have
 // nothing to format currency/dates with. One indexed _id lookup.
-const sendTokenResponse = async (user: IUser, statusCode: number, res: Response): Promise<void> => {
-  const token = user.getSignedJwtToken();
-
-  const garage = await Garage.findById(user.garage).select('country settings').lean();
+const sendTokenResponse = async (
+  { user, token }: { user: authUsecase.AuthUser; token: string },
+  statusCode: number,
+  res: Response
+): Promise<void> => {
+  const garage = await garageUsecase.findGarageLocaleSource({ garageId: user.garage });
 
   const options = {
     expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
@@ -47,9 +49,9 @@ const sendTokenResponse = async (user: IUser, statusCode: number, res: Response)
 export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     log.info('New garage registration attempt', { email: req.body.email, garageName: req.body.garageName });
-    const { user } = await authUsecase.registerNewGarage(req.body);
-    log.info('New garage registered successfully', { userId: user._id, garageId: user.garage });
-    await sendTokenResponse(user, 201, res);
+    const result = await authUsecase.registerNewGarage(req.body);
+    log.info('New garage registered successfully', { userId: result.user._id, garageId: result.user.garage });
+    await sendTokenResponse(result, 201, res);
   } catch (error) {
     log.error('Garage registration failed', { email: req.body.email, error: (error as Error).message });
     next(error);
@@ -61,12 +63,12 @@ export const register = async (req: Request, res: Response, next: NextFunction):
 export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     log.info('Login attempt', { email: req.body.email, ip: req.ip });
-    const { user } = await authUsecase.authenticateUser({
+    const result = await authUsecase.authenticateUser({
       email: req.body.email,
       password: req.body.password
     });
-    log.info('Login successful', { userId: user._id, role: user.role });
-    await sendTokenResponse(user, 200, res);
+    log.info('Login successful', { userId: result.user._id, role: result.user.role });
+    await sendTokenResponse(result, 200, res);
   } catch (error) {
     log.warn('Login failed', { email: req.body.email, error: (error as Error).message });
     next(error);
@@ -78,14 +80,14 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
 export const getMe = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     log.info('Me request', { userId: req.user?._id, role: req.user?.role });
-    // req.user.garage is populated by the auth middleware for internal use,
+    // req.user.garage is joined by the auth middleware for internal use,
     // but the client-side User type (web and mobile) expects garage as a
     // plain id string, matching /auth/login and /auth/register — flatten it
-    // back down here rather than leaking the populated document to clients.
-    // The populated garage already carries country/settings, so the locale
+    // back down here rather than leaking the joined row to clients.
+    // The joined garage already carries country/settings, so the locale
     // resolves here without an extra query — resolve BEFORE flattening.
-    const locale = resolveGarageLocale(req.user!.garage as unknown as Parameters<typeof resolveGarageLocale>[0]);
-    const data = { ...req.user!.toObject(), garage: req.user!.garage._id, locale };
+    const locale = resolveGarageLocale(req.user!.garage);
+    const data = { ...serializeRow(req.user!), garage: req.user!.garage._id, locale };
     res.status(200).json({ success: true, data });
   } catch (error) {
     log.error('Failed to get current user', { error: (error as Error).message });

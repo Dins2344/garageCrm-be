@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import app from '../app';
-import User from '../models/User';
-import Garage from '../models/Garage';
-import Customer from '../models/Customer';
+import { and, eq } from 'drizzle-orm';
+import { db, schema, findById, countRows, countInGarage } from './helpers/dbAccess';
 import { createGarageWithOwner, addGarageToOwner, nextPhone, authHeader, authHeaderFor } from './helpers/factories';
 
 // Note: the free plan caps an owner at 2 garages total (their original +
@@ -20,7 +19,7 @@ describe('Branches: create (uniqueness)', () => {
 
   it("rejects a branch whose name matches the owner's existing garage", async () => {
     const owner = await createGarageWithOwner('branch-unique-dupe');
-    const original = await Garage.findById(owner.garageId);
+    const original = await findById(schema.garages, owner.garageId);
 
     const dupe = await addGarageToOwner(owner.token, original!.name);
 
@@ -28,7 +27,7 @@ describe('Branches: create (uniqueness)', () => {
     expect(dupe.body.success).toBe(false);
     expect(dupe.body.message).toMatch(/duplicate/i);
 
-    const count = await Garage.countDocuments({ owner: owner.userId, name: original!.name });
+    const count = await countRows(schema.garages, and(eq(schema.garages.ownerId, owner.userId), eq(schema.garages.name, original!.name)));
     expect(count).toBe(1);
   });
 
@@ -45,10 +44,10 @@ describe('Branches: create (uniqueness)', () => {
 
   it("enforces the {owner, name} unique index at the database level directly", async () => {
     const owner = await createGarageWithOwner('branch-unique-model-level');
-    await Garage.create({ name: 'Model Level Branch', phone: nextPhone(), owner: owner.userId });
+    await db.insert(schema.garages).values({ name: 'Model Level Branch', phone: nextPhone(), ownerId: owner.userId });
 
     await expect(
-      Garage.create({ name: 'Model Level Branch', phone: nextPhone(), owner: owner.userId })
+      db.insert(schema.garages).values({ name: 'Model Level Branch', phone: nextPhone(), ownerId: owner.userId })
     ).rejects.toThrow();
   });
 });
@@ -62,7 +61,7 @@ describe('Branches: delete', () => {
 
     expect(del.status).toBe(400);
     expect(del.body.success).toBe(false);
-    expect(await Garage.findById(owner.garageId)).not.toBeNull();
+    expect(await findById(schema.garages, owner.garageId)).not.toBeNull();
   });
 
   it('deletes a branch with no staff directly, no staffAction needed', async () => {
@@ -82,8 +81,8 @@ describe('Branches: delete', () => {
       .set(authHeader(owner.token));
 
     expect(del.status).toBe(200);
-    expect(await Garage.findById(branchId)).toBeNull();
-    expect(await Customer.countDocuments({ garage: branchId })).toBe(0);
+    expect(await findById(schema.garages, branchId)).toBeNull();
+    expect(await countInGarage(schema.customers, branchId)).toBe(0);
   });
 
   it('refuses to delete a branch belonging to a different owner', async () => {
@@ -95,7 +94,7 @@ describe('Branches: delete', () => {
       .set(authHeader(ownerA.token));
 
     expect(del.status).toBe(404);
-    expect(await Garage.findById(ownerB.garageId)).not.toBeNull();
+    expect(await findById(schema.garages, ownerB.garageId)).not.toBeNull();
   });
 
   it('requires staffAction when the branch has staff assigned', async () => {
@@ -114,7 +113,7 @@ describe('Branches: delete', () => {
 
     expect(del.status).toBe(400);
     expect(del.body.message).toMatch(/staff/i);
-    expect(await Garage.findById(branchId)).not.toBeNull();
+    expect(await findById(schema.garages, branchId)).not.toBeNull();
   });
 
   it('GET branch staff returns the assigned staff, excluding the owner', async () => {
@@ -154,8 +153,8 @@ describe('Branches: delete', () => {
       .send({ staffAction: 'delete' });
 
     expect(del.status).toBe(200);
-    expect(await User.findById(staffId)).toBeNull();
-    expect(await Garage.findById(branchId)).toBeNull();
+    expect(await findById(schema.users, staffId)).toBeNull();
+    expect(await findById(schema.garages, branchId)).toBeNull();
   });
 
   it('reassigns staff to the chosen branch when staffAction is "reassign"', async () => {
@@ -176,10 +175,10 @@ describe('Branches: delete', () => {
       .send({ staffAction: 'reassign', reassignToGarageId: keepId });
 
     expect(del.status).toBe(200);
-    const movedStaff = await User.findById(staffId);
-    expect(String(movedStaff!.garage)).toBe(String(keepId));
-    expect(await Garage.findById(deleteId)).toBeNull();
-    expect(await Garage.findById(keepId)).not.toBeNull();
+    const movedStaff = await findById(schema.users, staffId);
+    expect(movedStaff!.garageId).toBe(keepId);
+    expect(await findById(schema.garages, deleteId)).toBeNull();
+    expect(await findById(schema.garages, keepId)).not.toBeNull();
   });
 
   it('rejects reassign without a target branch', async () => {
@@ -235,6 +234,6 @@ describe('Branches: delete', () => {
       .set(authHeader(adminLogin.body.token));
 
     expect(del.status).toBe(403);
-    expect(await Garage.findById(branchId)).not.toBeNull();
+    expect(await findById(schema.garages, branchId)).not.toBeNull();
   });
 });

@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import zlib from 'zlib';
 import request from 'supertest';
 import app from '../app';
-import Garage from '../models/Garage';
+import { eq } from 'drizzle-orm';
+import { db, schema } from './helpers/dbAccess';
 import { createGarageWithOwner, nextPhone, authHeader } from './helpers/factories';
 
 /** Downloads a PDF endpoint as a raw Buffer. */
@@ -84,7 +85,7 @@ describe('PDF generation', () => {
   beforeEach(async () => {
     const garage = await createGarageWithOwner('pdf-gen');
     token = garage.token;
-    await Garage.findByIdAndUpdate(garage.garageId, { gstNumber: '29ABCDE1234F1Z5' });
+    await db.update(schema.garages).set({ gstNumber: '29ABCDE1234F1Z5' }).where(eq(schema.garages._id, garage.garageId));
 
     const customer = await request(app)
       .post('/api/customers')
@@ -196,7 +197,7 @@ describe('PDF generation for a non-Indian garage', () => {
     // set it directly — this test is about output, not onboarding. The tax ID
     // keeps the field name `gstNumber` on purpose (published mobile builds
     // send it); only the printed label follows the country.
-    await Garage.findByIdAndUpdate(garageId, { country: 'GB', gstNumber: 'GB123456789' });
+    await db.update(schema.garages).set({ country: 'GB', gstNumber: 'GB123456789' }).where(eq(schema.garages._id, garageId));
 
     const customer = await request(app)
       .post('/api/customers')

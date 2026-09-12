@@ -1,10 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
-import mongoose from 'mongoose';
 import app from '../app';
-import Garage from '../models/Garage';
-import User from '../models/User';
-import ServiceReminder from '../models/ServiceReminder';
+import { db, schema, findById } from './helpers/dbAccess';
+import { newId } from '../utils/ids';
 import { createGarageWithOwner, nextPhone, authHeader, loginAsSuperAdmin, adminHeader } from './helpers/factories';
 import { SAMPLE_CUSTOMERS, SAMPLE_JOB_CARDS, SAMPLE_VEHICLES } from '../config/sampleData';
 
@@ -14,7 +12,7 @@ describe('Admin: delete user', () => {
   it('returns 404 for a non-existent user', async () => {
     const adminToken = await adminLogin();
     const res = await request(app)
-      .delete(`/api/admin/users/${new mongoose.Types.ObjectId()}`)
+      .delete(`/api/admin/users/${newId()}`)
       .set(adminHeader(adminToken));
 
     expect(res.status).toBe(404);
@@ -54,7 +52,7 @@ describe('Admin: delete user', () => {
     expect(staffLogin.status).toBe(401);
 
     // Garage and its data are untouched
-    const garageStillThere = await Garage.findById(owner.garageId);
+    const garageStillThere = await findById(schema.garages, owner.garageId);
     expect(garageStillThere).not.toBeNull();
     const customersStillThere = await request(app).get('/api/customers').set(authHeader(owner.token));
     expect(customersStillThere.body.data.some((c: { name: string }) => c.name === 'Kept Customer')).toBe(true);
@@ -97,10 +95,10 @@ describe('Admin: delete user', () => {
       .send({ partName: 'Brake Pad', unitPrice: 800, quantity: 10, threshold: 2 });
     expect(item.status).toBe(201);
 
-    const reminder = await ServiceReminder.create({
-      vehicle: vehicleId, customer: customerId, garage: owner.garageId,
+    const [reminder] = await db.insert(schema.serviceReminders).values({
+      vehicleId, customerId, garageId: owner.garageId,
       nextServiceDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    });
+    }).returning();
     expect(reminder._id).toBeTruthy();
 
     const del = await request(app)
@@ -124,8 +122,8 @@ describe('Admin: delete user', () => {
     });
 
     // Everything under that garage is gone
-    expect(await Garage.findById(owner.garageId)).toBeNull();
-    expect(await User.findById(owner.userId)).toBeNull();
+    expect(await findById(schema.garages, owner.garageId)).toBeNull();
+    expect(await findById(schema.users, owner.userId)).toBeNull();
 
     const ownerLogin = await request(app).post('/api/auth/login').send({ email: `owner-admin-owner-del@example.com`, password: 'password123' });
     expect(ownerLogin.status).toBe(401);
@@ -149,8 +147,8 @@ describe('Admin: delete user', () => {
       .set(adminHeader(adminToken));
     expect(del.status).toBe(200);
 
-    expect(await Garage.findById(ownerA.garageId)).toBeNull();
-    expect(await Garage.findById(ownerB.garageId)).not.toBeNull();
+    expect(await findById(schema.garages, ownerA.garageId)).toBeNull();
+    expect(await findById(schema.garages, ownerB.garageId)).not.toBeNull();
 
     const stillWorks = await request(app).get('/api/customers').set(authHeader(ownerB.token));
     expect(stillWorks.status).toBe(200);
@@ -162,7 +160,7 @@ describe('Admin: delete orphaned garage', () => {
   it('returns 404 for a non-existent garage', async () => {
     const adminToken = await adminLogin();
     const res = await request(app)
-      .delete(`/api/admin/garages/${new mongoose.Types.ObjectId()}`)
+      .delete(`/api/admin/garages/${newId()}`)
       .set(adminHeader(adminToken));
 
     expect(res.status).toBe(404);
@@ -171,7 +169,7 @@ describe('Admin: delete orphaned garage', () => {
 
   it('deletes a garage that has no owner', async () => {
     const adminToken = await adminLogin();
-    const orphan = await Garage.create({ name: 'Orphan Test Garage', phone: nextPhone(), address: {} });
+    const [orphan] = await db.insert(schema.garages).values({ name: 'Orphan Test Garage', phone: nextPhone() }).returning();
 
     const del = await request(app)
       .delete(`/api/admin/garages/${orphan._id}`)
@@ -179,7 +177,7 @@ describe('Admin: delete orphaned garage', () => {
 
     expect(del.status).toBe(200);
     expect(del.body.data.deletedGarage.name).toBe('Orphan Test Garage');
-    expect(await Garage.findById(orphan._id)).toBeNull();
+    expect(await findById(schema.garages, orphan._id)).toBeNull();
   });
 
   it('refuses to delete a garage that has an owner', async () => {
@@ -192,6 +190,6 @@ describe('Admin: delete orphaned garage', () => {
 
     expect(del.status).toBe(400);
     expect(del.body.success).toBe(false);
-    expect(await Garage.findById(owner.garageId)).not.toBeNull();
+    expect(await findById(schema.garages, owner.garageId)).not.toBeNull();
   });
 });

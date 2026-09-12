@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import app from '../app';
-import Garage from '../models/Garage';
-import User from '../models/User';
+import { eq, inArray } from 'drizzle-orm';
+import { db, schema } from './helpers/dbAccess';
 import { registerGarageOwner, nextPhone, authHeader } from './helpers/factories';
 
 describe('Auth', () => {
@@ -38,8 +38,8 @@ describe('Auth', () => {
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
 
-    const orphanedGarage = await Garage.findOne({ name: garageName });
-    expect(orphanedGarage).toBeNull();
+    const orphanedGarage = await db.query.garages.findFirst({ where: eq(schema.garages.name, garageName) });
+    expect(orphanedGarage).toBeUndefined();
   });
 
   it('leaves no orphaned garage when two concurrent signups race on the same email', async () => {
@@ -60,13 +60,13 @@ describe('Auth', () => {
     // loses the race on the unique email index and gets a clean error.
     expect(statuses).toEqual([201, 400]);
 
-    const users = await User.find({ email });
+    const users = await db.query.users.findMany({ where: eq(schema.users.email, email) });
     expect(users).toHaveLength(1);
 
-    const garages = await Garage.find({ name: { $in: ['Race Garage A', 'Race Garage B'] } });
+    const garages = await db.query.garages.findMany({ where: inArray(schema.garages.name, ['Race Garage A', 'Race Garage B']) });
     expect(garages).toHaveLength(1);
-    expect(garages[0].owner).toBeTruthy();
-    expect(String(garages[0].owner)).toBe(String(users[0]._id));
+    expect(garages[0].ownerId).toBeTruthy();
+    expect(garages[0].ownerId).toBe(users[0]._id);
   });
 
   it('logs in with correct credentials', async () => {

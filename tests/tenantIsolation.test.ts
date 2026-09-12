@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import app from '../app';
-import JobCard from '../models/JobCard';
+import { db, schema } from './helpers/dbAccess';
 import { createGarageWithOwner, nextPhone, authHeader, authHeaderFor, addGarageToOwner } from './helpers/factories';
 
 /**
@@ -235,15 +235,16 @@ describe('Free-plan usage limits', () => {
     // covered separately above) so only the invoice cap is under test.
     const jobCardIds: string[] = [];
     for (let i = 0; i < 4; i++) {
-      const jc = await JobCard.create({
+      const [jc] = await db.insert(schema.jobCards).values({
         serviceType: 'service',
-        vehicle: vehicle.body.data._id,
-        customer: customer.body.data._id,
-        garage: owner.garageId,
-        createdBy: owner.userId,
+        jobCardNumber: `JC-TEST-${String(i + 1).padStart(4, '0')}`,
+        vehicleId: vehicle.body.data._id,
+        customerId: customer.body.data._id,
+        garageId: owner.garageId,
+        createdById: owner.userId,
         odometerAtIntake: 10000
-      });
-      jobCardIds.push(jc._id.toString());
+      }).returning();
+      jobCardIds.push(jc._id);
     }
 
     for (let i = 0; i < 3; i++) {

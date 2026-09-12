@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import app from '../app';
-import Garage from '../models/Garage';
+import { schema, findById, countRows } from './helpers/dbAccess';
 import { createGarageWithOwner, authHeader, nextPhone } from './helpers/factories';
 
 /**
@@ -58,9 +58,9 @@ describe('country-aware phone validation at registration', () => {
   it('leaves no orphaned garage behind when the phone is rejected', async () => {
     // Registration creates User then Garage; a validation failure must happen
     // before either exists, not between them.
-    const before = await Garage.countDocuments();
+    const before = await countRows(schema.garages);
     await registerIn('GB', { phone: '9876543210' });
-    expect(await Garage.countDocuments()).toBe(before);
+    expect(await countRows(schema.garages)).toBe(before);
   });
 });
 
@@ -70,7 +70,7 @@ describe('timezone at registration', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.locale.timezone).toBe('America/Chicago');
 
-    const garage = await Garage.findById(res.body.data.garage);
+    const garage = await findById(schema.garages, res.body.data.garage);
     expect(garage!.settings.timezone).toBe('America/Chicago');
   });
 
@@ -87,7 +87,7 @@ describe('timezone at registration', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.locale.timezone).toBe('Asia/Kolkata');
 
-    const garage = await Garage.findById(res.body.data.garage);
+    const garage = await findById(schema.garages, res.body.data.garage);
     expect(garage!.settings.timezone).toBe('');
   });
 

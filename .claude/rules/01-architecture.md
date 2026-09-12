@@ -4,7 +4,7 @@
 # GaragePulse Backend — Code Standards Reference
 
 > **Last Updated:** August 2026
-> **Stack:** Node.js · Express 5 · Mongoose 9 · TypeScript · Vitest · Winston · JWT
+> **Stack:** Node.js · Express 5 · PostgreSQL (Neon) via Drizzle ORM · zod · TypeScript · Vitest · Winston · JWT
 
 ---
 
@@ -12,10 +12,11 @@
 
 ```
 backend/
-├── config/           # App configuration (db.ts, swagger.ts)
+├── config/           # App configuration (db.ts, schema.ts — the Drizzle tables, swagger.ts)
+├── drizzle/          # Generated SQL migrations, applied at boot — commit them
 ├── controllers/      # Thin HTTP controllers (parse req → call usecase → send res)
 ├── usecases/         # Core business logic (pure functions, no HTTP knowledge)
-├── models/           # Mongoose schemas & models (each exports its TS interface too)
+├── models/           # Per-entity: table re-export, zod schemas, row types, toApi() serialiser
 ├── routes/           # Express route definitions (verb + path + middleware)
 ├── middleware/        # Express middleware (auth, error handling, sanitization)
 ├── services/         # External integrations (email, SMS, PDF, cron)
@@ -67,9 +68,12 @@ backend/
    - **Never** access `req`, `res`, or `next`
    - **Never** import controllers or routes
 
-3. **Models** define data shapes and database indexes. They:
-   - Use Mongoose schemas with proper validations
-   - Define compound indexes for multi-tenant queries (`garage + field`)
+3. **Models** define data shapes, validation and the API serialisation. They:
+   - Re-export their table from `config/schema.ts` (where columns, indexes and
+     foreign keys live — one file, so drizzle-kit can diff it)
+   - Export zod `create<X>Schema` / `update<X>Schema` with the user-facing
+     messages, run by the usecase through `runSchema()`
+   - Export `toApi(row)` — the one place the client-facing JSON shape is built
    - **Never** contain business logic
 
 ```
@@ -81,8 +85,10 @@ RIGHT   controller → usecase → model
 ### Example — Adding a New Feature (e.g., "Suppliers")
 
 ```bash
-# 1. Model (+ exported TS interface, e.g. ISupplier)
+# 1. Table in config/schema.ts (+ relations), then the model file
+#    (re-export, zod schemas, SupplierRow type, supplierToApi)
 models/Supplier.ts
+npx drizzle-kit generate --name add-suppliers   # commit drizzle/NNNN_add-suppliers.sql
 
 # 2. Usecase (business logic)
 usecases/supplierUsecase.ts
@@ -130,8 +136,8 @@ tests/supplier.test.ts
 ### Variables
 
 - **camelCase** for variables and function names
-- **PascalCase** for Mongoose model names
-- **UPPER_SNAKE_CASE** for constants (`JWT_SECRET`, `MONGODB_URI`)
+- **camelCase plural** for table exports (`jobCards`), **PascalCase** for model files
+- **UPPER_SNAKE_CASE** for constants (`JWT_SECRET`, `DATABASE_URL`)
 - Always destructure function arguments in usecases: `async ({ garageId, search, page }) => {}`
 
 ---

@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import app from '../app';
-import Admin from '../models/Admin';
+import { eq } from 'drizzle-orm';
+import { db, schema } from './helpers/dbAccess';
 import {
   createSuperAdmin,
   loginAsSuperAdmin,
@@ -92,14 +93,14 @@ describe('Admin authentication', () => {
     it('stores the password hashed, not in plaintext', async () => {
       await createSuperAdmin();
 
-      const stored = await Admin.findOne({ email: ADMIN_EMAIL }).select('+password');
+      const stored = await db.query.admins.findFirst({ where: eq(schema.admins.email, ADMIN_EMAIL) });
       expect(stored!.password).not.toBe(ADMIN_PASSWORD);
       expect(stored!.password.startsWith('$2')).toBe(true);
     });
 
     it('records lastLoginAt on success', async () => {
       await createSuperAdmin();
-      expect((await Admin.findOne({ email: ADMIN_EMAIL }))!.lastLoginAt).toBeUndefined();
+      expect((await db.query.admins.findFirst({ where: eq(schema.admins.email, ADMIN_EMAIL) }))!.lastLoginAt).toBeNull();
 
       await request(app)
         .post('/api/admin/login')
@@ -108,7 +109,7 @@ describe('Admin authentication', () => {
       // The write is fire-and-forget so a failure can't fail the login; give
       // it a tick to land before asserting.
       await new Promise(resolve => setTimeout(resolve, 50));
-      expect((await Admin.findOne({ email: ADMIN_EMAIL }))!.lastLoginAt).toBeInstanceOf(Date);
+      expect((await db.query.admins.findFirst({ where: eq(schema.admins.email, ADMIN_EMAIL) }))!.lastLoginAt).toBeInstanceOf(Date);
     });
   });
 
@@ -129,9 +130,9 @@ describe('Admin authentication', () => {
 
     it('rejects a token signed with a different secret', async () => {
       await createSuperAdmin();
-      const admin = await Admin.findOne({ email: ADMIN_EMAIL });
+      const admin = await db.query.admins.findFirst({ where: eq(schema.admins.email, ADMIN_EMAIL) });
       const forged = jwt.sign(
-        { isSuperAdmin: true, sub: admin!._id.toString(), email: ADMIN_EMAIL },
+        { isSuperAdmin: true, sub: admin!._id, email: ADMIN_EMAIL },
         'not-the-admin-secret',
         { expiresIn: '4h' }
       );
@@ -143,7 +144,7 @@ describe('Admin authentication', () => {
 
     it('rejects a correctly-signed token whose admin no longer exists', async () => {
       const token = await loginAsSuperAdmin();
-      await Admin.deleteMany({});
+      await db.delete(schema.admins);
 
       const res = await request(app).get('/api/admin/stats').set(adminHeader(token));
 
@@ -161,7 +162,7 @@ describe('Admin authentication', () => {
       const before = await request(app).get('/api/admin/stats').set(adminHeader(token));
       expect(before.status).toBe(200);
 
-      await Admin.updateOne({ email: ADMIN_EMAIL }, { $set: { isActive: false } });
+      await db.update(schema.admins).set({ isActive: false }).where(eq(schema.admins.email, ADMIN_EMAIL));
 
       const after = await request(app).get('/api/admin/stats').set(adminHeader(token));
       expect(after.status).toBe(401);

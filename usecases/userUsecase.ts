@@ -1,6 +1,9 @@
-import bcrypt from 'bcryptjs';
-import { Types } from 'mongoose';
-import User, { IUser } from '../models/User';
+import { and, count, eq, ne } from 'drizzle-orm';
+import { db } from '../config/db';
+import { users, USER_PUBLIC_COLUMNS, createUserSchema, updateUserSchema, userToApi } from '../models/User';
+import { hashPassword } from '../utils/password';
+import { runSchema } from '../utils/validation';
+import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { FREE_PLAN_LIMITS } from '../config/planLimits';
@@ -8,40 +11,47 @@ import { FREE_PLAN_LIMITS } from '../config/planLimits';
 const log = logger.child('UserUsecase');
 
 interface ListInput {
-  garageId: Types.ObjectId | string;
+  garageId: string;
 }
 
-export const getStaffList = async ({ garageId }: ListInput) => {
+export const getStaffList = async ({ garageId }: ListInput): Promise<ApiObject[]> => {
   log.info('Fetching staff list', { garageId });
-  const users = await User.find({ garage: garageId }).lean();
-  log.info('Staff list fetched', { garageId, count: users.length });
-  return users;
+  const rows = await db.query.users.findMany({
+    columns: USER_PUBLIC_COLUMNS,
+    where: eq(users.garageId, garageId)
+  });
+  log.info('Staff list fetched', { garageId, count: rows.length });
+  return rows.map(userToApi);
 };
 
 interface GetByIdInput {
   staffId: string;
-  garageId: Types.ObjectId | string;
+  garageId: string;
 }
 
-export const getStaffMember = async ({ staffId, garageId }: GetByIdInput) => {
+export const getStaffMember = async ({ staffId, garageId }: GetByIdInput): Promise<ApiObject> => {
   log.info('Fetching staff member', { staffId, garageId });
-  const user = await User.findOne({ _id: staffId, garage: garageId }).lean();
+  const user = await db.query.users.findFirst({
+    columns: USER_PUBLIC_COLUMNS,
+    where: and(eq(users._id, staffId), eq(users.garageId, garageId))
+  });
   if (!user) {
     log.warn('Staff member not found', { staffId, garageId });
     throw new HttpError('User not found', 404);
   }
-  return user;
+  return userToApi(user);
 };
 
 interface RegisterInput {
-  staffData: Partial<IUser>;
-  garageId: Types.ObjectId | string;
+  staffData: Record<string, unknown>;
+  garageId: string;
 }
 
-export const registerStaff = async ({ staffData, garageId }: RegisterInput) => {
+export const registerStaff = async ({ staffData, garageId }: RegisterInput): Promise<ApiObject> => {
   log.info('Registering new staff member', { garageId, role: staffData.role, email: staffData.email });
 
-  const staffCount = await User.countDocuments({ garage: garageId, role: { $ne: 'owner' } });
+  const [{ staffCount }] = await db.select({ staffCount: count() }).from(users)
+    .where(and(eq(users.garageId, garageId), ne(users.role, 'owner')));
   if (staffCount >= FREE_PLAN_LIMITS.maxStaffPerGarage) {
     throw new HttpError(
       `Staff limit reached (${FREE_PLAN_LIMITS.maxStaffPerGarage} per garage) on the free plan.`,
@@ -49,33 +59,36 @@ export const registerStaff = async ({ staffData, garageId }: RegisterInput) => {
     );
   }
 
-  const dataWithGarage = { ...staffData, garage: garageId };
-  const user = await User.create(dataWithGarage);
+  const input = runSchema(createUserSchema, staffData);
+  const [user] = await db.insert(users).values({
+    ...input,
+    password: await hashPassword(input.password),
+    garageId
+  }).returning();
+
   log.info('New staff registered', { userId: user._id, role: user.role, garageId });
-  return user;
+  return userToApi(user);
 };
 
 interface UpdateInput {
   staffId: string;
-  garageId: Types.ObjectId | string;
-  updateData: Partial<IUser>;
+  garageId: string;
+  updateData: Record<string, unknown>;
 }
 
-export const updateStaffDetails = async ({ staffId, garageId, updateData }: UpdateInput) => {
+export const updateStaffDetails = async ({ staffId, garageId, updateData }: UpdateInput): Promise<ApiObject> => {
   log.info('Updating staff details', { staffId, garageId, fields: Object.keys(updateData) });
 
-  // findOneAndUpdate bypasses the pre('save') bcrypt hook, so we hash manually
-  if (updateData.password) {
-    const salt = await bcrypt.genSalt(12);
-    updateData.password = await bcrypt.hash(updateData.password, salt);
+  const changes = runSchema(updateUserSchema, updateData);
+  if (changes.password) {
+    changes.password = await hashPassword(changes.password);
     log.info('Password hashed before staff update', { staffId });
   }
 
-  const user = await User.findOneAndUpdate(
-    { _id: staffId, garage: garageId },
-    updateData,
-    { new: true, runValidators: true }
-  );
+  const scope = and(eq(users._id, staffId), eq(users.garageId, garageId));
+  const user = Object.keys(changes).length === 0
+    ? await db.query.users.findFirst({ where: scope })
+    : (await db.update(users).set(changes).where(scope).returning())[0];
 
   if (!user) {
     log.warn('Staff member not found for update', { staffId, garageId });
@@ -83,40 +96,42 @@ export const updateStaffDetails = async ({ staffId, garageId, updateData }: Upda
   }
 
   log.info('Staff details updated', { staffId });
-  return user;
+  return userToApi(user);
 };
 
 interface DeactivateInput {
   staffId: string;
-  garageId: Types.ObjectId | string;
+  garageId: string;
   action: string;
 }
 
-export const deactivateStaff = async ({ staffId, garageId, action }: DeactivateInput) => {
+export const deactivateStaff = async ({ staffId, garageId, action }: DeactivateInput): Promise<ApiObject> => {
   log.info('Toggling staff account status', { staffId, garageId, action });
-  const user = await User.findOne({ _id: staffId, garage: garageId });
+  const [user] = await db.update(users)
+    .set({ isActive: action === 'activate' })
+    .where(and(eq(users._id, staffId), eq(users.garageId, garageId)))
+    .returning();
 
   if (!user) {
     log.warn('Staff member not found for status toggle', { staffId, garageId });
     throw new HttpError('User not found', 404);
   }
 
-  user.isActive = action === 'activate';
-  await user.save();
-
   log.info(`Staff account ${user.isActive ? 'activated' : 'deactivated'}`, { staffId, garageId });
-  return user;
+  return userToApi(user);
 };
 
 interface RemoveInput {
   staffId: string;
-  garageId: Types.ObjectId | string;
+  garageId: string;
 }
 
 export const removeStaff = async ({ staffId, garageId }: RemoveInput): Promise<true> => {
   log.info('Removing staff member', { staffId, garageId });
-  const user = await User.findOneAndDelete({ _id: staffId, garage: garageId });
-  if (!user) {
+  const deleted = await db.delete(users)
+    .where(and(eq(users._id, staffId), eq(users.garageId, garageId)))
+    .returning({ _id: users._id });
+  if (deleted.length === 0) {
     log.warn('Staff member not found for deletion', { staffId, garageId });
     throw new HttpError('User not found', 404);
   }

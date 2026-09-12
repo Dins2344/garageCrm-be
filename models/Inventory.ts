@@ -1,99 +1,56 @@
-import mongoose, { Document, Schema, Types } from 'mongoose';
-import { InventoryCategory, INVENTORY_CATEGORIES } from '../types/domain';
+import { z } from 'zod';
+import { inventory, EMPTY_SUPPLIER, Supplier } from '../config/schema';
+import { INVENTORY_CATEGORIES } from '../types/domain';
+import { requiredString, optionalString, boundedNumber } from '../utils/validation';
+import { serializeRow, ApiObject } from '../utils/serialize';
 
-export interface ISupplier {
-  name: string;
-  phone: string;
-  email: string;
-}
+export { inventory };
+export type InventoryRow = typeof inventory.$inferSelect;
+export type NewInventory = typeof inventory.$inferInsert;
+export type { Supplier as ISupplier };
 
-export interface IInventory extends Document {
-  _id: Types.ObjectId;
-  partName: string;
-  partNumber: string;
-  category: InventoryCategory;
-  quantity: number;
-  threshold: number;
-  unitPrice: number;
-  sellingPrice: number;
-  supplier: ISupplier;
-  location: string;
-  garage: Types.ObjectId;
-  isActive: boolean;
-  isLowStock: boolean; // virtual
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const inventorySchema = new Schema<IInventory>({
-  partName: {
-    type: String,
-    required: [true, 'Part name is required'],
-    trim: true
-  },
-  partNumber: {
-    type: String,
-    default: '',
-    trim: true
-  },
-  category: {
-    type: String,
-    enum: INVENTORY_CATEGORIES,
-    default: 'other'
-  },
-  quantity: {
-    type: Number,
-    required: true,
-    default: 0,
-    min: [0, 'Quantity cannot be negative']
-  },
-  threshold: {
-    type: Number,
-    default: 5,
-    min: 0
-  },
-  unitPrice: {
-    type: Number,
-    required: [true, 'Unit price is required'],
-    min: 0
-  },
-  sellingPrice: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-  supplier: {
-    name: { type: String, default: '' },
-    phone: { type: String, default: '' },
-    email: { type: String, default: '' }
-  },
-  location: {
-    type: String,
-    default: '',
-    trim: true
-  },
-  garage: {
-    type: Schema.Types.ObjectId,
-    ref: 'Garage',
-    required: true
-  },
-  isActive: {
-    type: Boolean,
-    default: true
-  }
-}, {
-  timestamps: true
+const supplierSchema = z.object({
+  name: optionalString(),
+  phone: optionalString(),
+  email: optionalString()
 });
 
-// Virtual: check if stock is low
-inventorySchema.virtual('isLowStock').get(function (this: IInventory) {
-  return this.quantity <= this.threshold;
+const categoryField = z.enum(INVENTORY_CATEGORIES, { error: `Category must be one of: ${INVENTORY_CATEGORIES.join(', ')}` });
+const nonNegative = (message: string, floor: string) => boundedNumber(message, { min: [0, floor] });
+
+export const createInventorySchema = z.object({
+  partName: requiredString('Part name is required'),
+  partNumber: optionalString(),
+  category: categoryField.default('other'),
+  quantity: nonNegative('Quantity must be a number', 'Quantity cannot be negative').default(0),
+  threshold: nonNegative('Threshold must be a number', 'Threshold cannot be negative').default(5),
+  unitPrice: nonNegative('Unit price is required', 'Unit price cannot be negative'),
+  sellingPrice: nonNegative('Selling price must be a number', 'Selling price cannot be negative').default(0),
+  supplier: supplierSchema.default(EMPTY_SUPPLIER),
+  location: optionalString(),
+  isActive: z.boolean().default(true)
 });
 
-inventorySchema.set('toJSON', { virtuals: true });
-inventorySchema.set('toObject', { virtuals: true });
+export const updateInventorySchema = z.object({
+  partName: requiredString('Part name is required').optional(),
+  partNumber: z.string().trim().optional(),
+  category: categoryField.optional(),
+  quantity: nonNegative('Quantity must be a number', 'Quantity cannot be negative').optional(),
+  threshold: nonNegative('Threshold must be a number', 'Threshold cannot be negative').optional(),
+  unitPrice: nonNegative('Unit price is required', 'Unit price cannot be negative').optional(),
+  sellingPrice: nonNegative('Selling price must be a number', 'Selling price cannot be negative').optional(),
+  // Default-free on purpose — see `models/Garage.ts` on why `.partial()` will not do.
+  supplier: z.object({
+    name: z.string().trim().optional(),
+    phone: z.string().trim().optional(),
+    email: z.string().trim().optional()
+  }).optional(),
+  location: z.string().trim().optional(),
+  isActive: z.boolean().optional()
+});
 
-inventorySchema.index({ garage: 1, partName: 'text', partNumber: 'text' });
-inventorySchema.index({ garage: 1, category: 1 });
-
-export default mongoose.model<IInventory>('Inventory', inventorySchema);
+/** `isLowStock` was a Mongoose virtual; the web Inventory page filters on it. */
+export const inventoryToApi = (row: InventoryRow): ApiObject => ({
+  ...serializeRow(row),
+  isLowStock: row.quantity <= row.threshold
+});
