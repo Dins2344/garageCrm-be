@@ -37,7 +37,7 @@ import {
   AnyPgColumn
 } from 'drizzle-orm/pg-core';
 import { newId } from '../utils/ids';
-import { Role } from '../types/domain';
+import { Role, VerificationChannel } from '../types/domain';
 
 // ─── JSON shapes ──────────────────────────────────────────────────────────
 
@@ -214,10 +214,36 @@ export const users = pgTable('users', {
   isActive: boolean().notNull().default(true),
   resetPasswordToken: text(),
   resetPasswordExpire: ts(),
+  // Null until the owner confirms a code sent to that address. Cleared again
+  // by `updateUserProfile` when the address changes — a verified mark must
+  // describe the current value. The subscription gate reads these.
+  emailVerifiedAt: ts(),
+  phoneVerifiedAt: ts(),
   ...timestamps
 }, (t) => [
   uniqueIndex('users_email_unique').on(t.email),
   index('users_garage_idx').on(t.garageId)
+]);
+
+/**
+ * An in-flight verification code. The code itself is stored only as a
+ * SHA-256 hash; `target` records the address it was sent to so a code cannot
+ * confirm an email or phone the owner has since changed. A row is spent by
+ * `consumedAt` — success, too many wrong attempts, or superseded by a newer
+ * code for the same channel.
+ */
+export const verificationChallenges = pgTable('verification_challenges', {
+  _id: idColumn(),
+  userId: text().notNull().references(() => users._id, { onDelete: 'cascade' }),
+  channel: text().$type<VerificationChannel>().notNull(),
+  target: text().notNull(),
+  codeHash: text().notNull(),
+  expiresAt: ts().notNull(),
+  attempts: integer().notNull().default(0),
+  consumedAt: ts(),
+  ...timestamps
+}, (t) => [
+  index('verification_challenges_user_channel_idx').on(t.userId, t.channel, t.createdAt)
 ]);
 
 // ─── Tenant data ──────────────────────────────────────────────────────────
@@ -418,8 +444,8 @@ export const serviceRemindersRelations = relations(serviceReminders, ({ one }) =
 
 /** Every table, in an order that satisfies foreign keys on insert. */
 export const TABLES_IN_FK_ORDER = [
-  admins, appReleases, garages, users, customers, vehicles, inventory, jobCards, invoices, serviceReminders
+  admins, appReleases, garages, users, verificationChallenges, customers, vehicles, inventory, jobCards, invoices, serviceReminders
 ] as const;
 
 /** `TRUNCATE` all tables at once — used by the test harness between tests. */
-export const TRUNCATE_ALL = sql`TRUNCATE TABLE admins, app_releases, garages, users, customers, vehicles, inventory, job_cards, invoices, service_reminders CASCADE`;
+export const TRUNCATE_ALL = sql`TRUNCATE TABLE admins, app_releases, garages, users, verification_challenges, customers, vehicles, inventory, job_cards, invoices, service_reminders CASCADE`;

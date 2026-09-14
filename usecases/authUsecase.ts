@@ -195,12 +195,20 @@ interface UpdateProfileInput {
 
 export const updateUserProfile = async ({ userId, updateData }: UpdateProfileInput): Promise<ApiObject | null> => {
   const changes = runSchema(updateUserSchema.pick({ name: true, phone: true }), updateData);
+  const current = await db.query.users.findFirst({ columns: USER_PUBLIC_COLUMNS, where: eq(users._id, userId) });
+  if (!current) {
+    return null;
+  }
   if (Object.keys(changes).length === 0) {
-    const current = await db.query.users.findFirst({ columns: USER_PUBLIC_COLUMNS, where: eq(users._id, userId) });
-    return current ? userToApi(current) : null;
+    return userToApi(current);
   }
 
-  const [user] = await db.update(users).set(changes).where(eq(users._id, userId)).returning();
+  // A verified mark describes one specific number. A new number starts over.
+  const phoneChanged = changes.phone !== undefined && changes.phone !== current.phone;
+  const [user] = await db.update(users)
+    .set({ ...changes, ...(phoneChanged ? { phoneVerifiedAt: null } : {}) })
+    .where(eq(users._id, userId))
+    .returning();
   return user ? userToApi(user) : null;
 };
 

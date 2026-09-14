@@ -274,6 +274,26 @@ evaluating the app does that.
   refuse the removal outright. Real rows attached to real customers are never
   touched.
 
+## Owner verification
+
+`usecases/verificationUsecase.ts` lets an **owner** (only — `authorize('owner')`
+on the routes) confirm their email and phone by entering a six-digit code
+from Settings on either client. Success stamps `users.emailVerifiedAt` /
+`phoneVerifiedAt`, which every auth payload carries and the subscription
+gate will read. Rules that are easy to break by tidying:
+
+- **Codes are stored hashed** in `verification_challenges` with the address
+  they were sent to; `updateUserProfile` clears `phoneVerifiedAt` when the
+  number changes, and a code is refused if its target no longer matches.
+- **Production refuses unconfigured delivery with 503.** `sendEmail` falls
+  back to an Ethereal test inbox and `sendSms` merely logs when the provider
+  is unset — either would leave an owner waiting for a code that never
+  comes. Outside production the code is logged so the flow can be completed
+  locally; that log line must never fire in production.
+- Ten-minute expiry, five wrong attempts burn it, sixty-second resend
+  cooldown, five codes per channel per hour — all in
+  `models/VerificationChallenge.ts`. `tests/verification.test.ts` pins each.
+
 ## Locale and formatting
 
 - PDFs use `formatMoney(amount, locale, { display: 'code' })` — PDFKit's

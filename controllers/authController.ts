@@ -39,6 +39,8 @@ const sendTokenResponse = async (
         phone: user.phone,
         role: user.role,
         garage: user.garage,
+        emailVerifiedAt: user.emailVerifiedAt ?? null,
+        phoneVerifiedAt: user.phoneVerifiedAt ?? null,
         locale: resolveGarageLocale(garage)
       }
     });

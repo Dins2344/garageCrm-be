@@ -1165,6 +1165,113 @@
  *         description: Current password incorrect
  */
 
+/**
+ * @swagger
+ * /auth/verification:
+ *   get:
+ *     tags: [Auth]
+ *     summary: Verified state of the caller's email and phone (owner only)
+ *     description: >
+ *       The same two timestamps ride on every auth payload as
+ *       `emailVerifiedAt` / `phoneVerifiedAt`; this endpoint exists so the
+ *       Settings card can refresh them without re-fetching the session.
+ *     responses:
+ *       200:
+ *         description: Current values and when each was verified (`null` = not verified)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data: { $ref: '#/components/schemas/VerificationStatus' }
+ *       403:
+ *         description: Caller is not an owner
+ */
+
+/**
+ * @swagger
+ * /auth/verification/{channel}/send:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Send a six-digit verification code to the caller's email or phone (owner only)
+ *     description: >
+ *       The code lives ten minutes and is stored only as a hash. A second
+ *       request within a minute, or a sixth within an hour, is refused with
+ *       429. If the channel is already verified nothing is sent and the
+ *       response says `already-verified`. In production a server without
+ *       SMTP (for email) or Twilio (for phone) answers 503 rather than
+ *       pretending to send. Rate limited per IP as well.
+ *     parameters:
+ *       - in: path
+ *         name: channel
+ *         required: true
+ *         schema: { type: string, enum: [email, phone] }
+ *     responses:
+ *       200:
+ *         description: Code sent, or the channel was already verified
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data: { $ref: '#/components/schemas/VerificationSendResult' }
+ *       400:
+ *         description: Unknown channel, or the phone number cannot be validated for the garage's country
+ *       403:
+ *         description: Caller is not an owner
+ *       429:
+ *         description: Resend cooldown or hourly cap reached
+ *       503:
+ *         description: Email or SMS delivery is not configured on this server
+ */
+
+/**
+ * @swagger
+ * /auth/verification/{channel}/confirm:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Confirm a verification code (owner only)
+ *     description: >
+ *       Five wrong codes burn the challenge and a new one must be requested.
+ *       A code is refused if the address it was sent to has changed since.
+ *       Confirming an already-verified channel is a no-op 200.
+ *     parameters:
+ *       - in: path
+ *         name: channel
+ *         required: true
+ *         schema: { type: string, enum: [email, phone] }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [code]
+ *             properties:
+ *               code:
+ *                 type: string
+ *                 pattern: '^[0-9]{6}$'
+ *                 example: '482913'
+ *     responses:
+ *       200:
+ *         description: Verified; the updated user with the channel's `*VerifiedAt` set
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data: { $ref: '#/components/schemas/User' }
+ *       400:
+ *         description: Wrong code (attempts remaining in the message), expired, burned, or the address changed
+ *       403:
+ *         description: Caller is not an owner
+ *       429:
+ *         description: Too many attempts from this IP
+ */
+
 // ════════════════════════════════════════
 // GARAGE — BRANCHES
 // ════════════════════════════════════════

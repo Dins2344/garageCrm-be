@@ -437,3 +437,50 @@ export const sendPasswordResetEmail = async ({ to, name, resetUrl }: PasswordRes
 
   return sendEmail({ to, subject, html, text });
 };
+
+interface VerificationEmailInput {
+  to: string;
+  name: string;
+  code: string;
+  expiresInMinutes: number;
+}
+
+// ───── Verification Code Email ─────
+export const sendVerificationEmail = async ({ to, name, code, expiresInMinutes }: VerificationEmailInput): Promise<SendEmailResult> => {
+  const subject = `${code} is your GaragePulse verification code`;
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:32px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.07);">
+    <tr>
+      <td style="background:linear-gradient(135deg,#3b5ff8,#7c3aed);padding:36px 40px;text-align:center;">
+        <p style="color:rgba(255,255,255,0.75);margin:0 0 6px;font-size:13px;letter-spacing:0.06em;text-transform:uppercase;">Verify your email</p>
+        <h1 style="color:#ffffff;margin:0;font-size:26px;font-weight:700;">GaragePulse</h1>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:36px 40px;">
+        <p style="font-size:16px;color:#1e293b;margin:0 0 8px;">Hi <strong>${name}</strong>,</p>
+        <p style="font-size:15px;color:#475569;line-height:1.7;margin:0 0 28px;">
+          Enter this code in GaragePulse to confirm this email address. It expires in <strong>${expiresInMinutes} minutes</strong>.
+        </p>
+        <p style="font-size:36px;font-weight:700;letter-spacing:0.3em;color:#1e293b;text-align:center;margin:0 0 28px;font-family:'Courier New',monospace;">${code}</p>
+        <p style="font-size:13px;color:#94a3b8;margin:0;">If you did not request this, you can ignore this email. Nobody can verify your address without the code.</p>
+      </td>
+    </tr>
+    <tr>
+      <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+        <p style="font-size:12px;color:#94a3b8;margin:0;">Sent by GaragePulse CRM</p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const text = `Hi ${name},\n\nYour GaragePulse verification code is ${code}. It expires in ${expiresInMinutes} minutes.\n\nIf you did not request this, you can ignore this email.`;
+
+  return sendEmail({ to, subject, html, text });
+};
