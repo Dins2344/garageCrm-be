@@ -202,8 +202,39 @@ const options: swaggerJsdoc.Options = {
             garage: { type: 'string' },
             avatar: { type: 'string' },
             isActive: { type: 'boolean' },
+            emailVerifiedAt: { type: 'string', format: 'date-time', nullable: true, description: 'When the owner confirmed a code sent to this email; null until then' },
+            phoneVerifiedAt: { type: 'string', format: 'date-time', nullable: true, description: 'When the owner confirmed a code sent to this phone; null until then' },
             createdAt: { type: 'string', format: 'date-time' },
             updatedAt: { type: 'string', format: 'date-time' }
+          }
+        },
+        VerificationStatus: {
+          type: 'object',
+          properties: {
+            email: {
+              type: 'object',
+              properties: {
+                value: { type: 'string', format: 'email' },
+                verifiedAt: { type: 'string', format: 'date-time', nullable: true }
+              }
+            },
+            phone: {
+              type: 'object',
+              properties: {
+                value: { type: 'string' },
+                verifiedAt: { type: 'string', format: 'date-time', nullable: true }
+              }
+            }
+          }
+        },
+        VerificationSendResult: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['sent', 'already-verified'] },
+            channel: { type: 'string', enum: ['email', 'phone'] },
+            target: { type: 'string', description: 'Masked address the code went to', example: 'd***n@example.com' },
+            expiresInSeconds: { type: 'integer', example: 600 },
+            resendAfterSeconds: { type: 'integer', example: 60 }
           }
         },
         CreateUserRequest: {

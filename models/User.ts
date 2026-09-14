@@ -23,6 +23,8 @@ export const USER_PUBLIC_COLUMNS = {
   garageId: true,
   avatar: true,
   isActive: true,
+  emailVerifiedAt: true,
+  phoneVerifiedAt: true,
   createdAt: true,
   updatedAt: true
 } as const;

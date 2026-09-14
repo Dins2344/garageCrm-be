@@ -20,7 +20,8 @@ vi.mock('../services/emailService', () => ({
   sendEmail: vi.fn().mockResolvedValue({ logged: true, messageId: null }),
   sendServiceReminder: vi.fn().mockResolvedValue({ skipped: true, reason: 'test' }),
   sendEstimationEmail: vi.fn().mockResolvedValue({ skipped: true, reason: 'test' }),
-  sendPasswordResetEmail: vi.fn().mockResolvedValue({ skipped: true, reason: 'test' })
+  sendPasswordResetEmail: vi.fn().mockResolvedValue({ skipped: true, reason: 'test' }),
+  sendVerificationEmail: vi.fn().mockResolvedValue({ logged: true, messageId: null })
 }));
 
 vi.mock('../services/smsService', () => ({
@@ -45,7 +46,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   await pglite.exec(
-    'TRUNCATE TABLE admins, app_releases, garages, users, customers, vehicles, inventory, job_cards, invoices, service_reminders CASCADE'
+    'TRUNCATE TABLE admins, app_releases, garages, users, verification_challenges, customers, vehicles, inventory, job_cards, invoices, service_reminders CASCADE'
   );
 });
 

@@ -58,3 +58,8 @@ export type ReminderType = (typeof REMINDER_TYPES)[number];
 
 export const REMINDER_STATUSES = ['pending', 'sent', 'completed', 'dismissed'] as const;
 export type ReminderStatus = (typeof REMINDER_STATUSES)[number];
+
+// The channels an owner can verify from Settings. Mirrored as a type in both
+// clients' `types/models.ts`.
+export const VERIFICATION_CHANNELS = ['email', 'phone'] as const;
+export type VerificationChannel = (typeof VERIFICATION_CHANNELS)[number];
