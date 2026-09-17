@@ -284,7 +284,6 @@ export const transform = (src: SourceCollections) => {
       totalVisits: num(c.totalVisits),
       totalSpent: num(c.totalSpent),
       notes: str(c.notes),
-      isSample: bool(c.isSample, false),
       createdAt: date(c.createdAt),
       updatedAt: date(c.updatedAt)
     })),
@@ -301,7 +300,6 @@ export const transform = (src: SourceCollections) => {
       currentOdometerReading: num(v.currentOdometerReading),
       customerId: hex(v.customer)!,
       garageId: hex(v.garage)!,
-      isSample: bool(v.isSample, false),
       createdAt: date(v.createdAt),
       updatedAt: date(v.updatedAt)
     })),
@@ -364,7 +362,6 @@ export const transform = (src: SourceCollections) => {
         invoiceId: null as string | null,
         createdById: userOrNull(j.createdBy),
         estimationToken: j.estimationToken ? str(j.estimationToken) : null,
-        isSample: bool(j.isSample, false),
         createdAt: date(j.createdAt),
         updatedAt: date(j.updatedAt)
       };
@@ -394,7 +391,6 @@ export const transform = (src: SourceCollections) => {
       paidAt: inv.paidAt ? date(inv.paidAt) : null,
       notes: str(inv.notes),
       createdById: userOrNull(inv.createdBy),
-      isSample: bool(inv.isSample, false),
       createdAt: date(inv.createdAt),
       updatedAt: date(inv.updatedAt)
     })),

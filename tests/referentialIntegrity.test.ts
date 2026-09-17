@@ -4,7 +4,6 @@ import { eq } from 'drizzle-orm';
 import app from '../app';
 import { db, schema, countInGarage, findById } from './helpers/dbAccess';
 import { createGarageWithOwner, nextPhone, authHeader } from './helpers/factories';
-import { SAMPLE_CUSTOMERS } from '../config/sampleData';
 
 /**
  * Behaviour the move to Postgres changed on purpose. Mongo deleted a parent
@@ -84,16 +83,14 @@ describe('deleting a parent that still has dependents', () => {
 });
 
 describe('document numbering', () => {
-  it('continues the per-garage sequence after the seeded cards', async () => {
-    const { token, garageId } = await createGarageWithOwner('numbering');
+  it('numbers a fresh garage from 0001 in the documented format', async () => {
+    const { token } = await createGarageWithOwner('numbering');
     const customerId = await makeCustomer(token);
     const vehicleId = await makeVehicle(token, customerId, 'KA01NM0001');
 
-    const seeded = await countInGarage(schema.jobCards, garageId);
     const card = await makeJobCard(token, vehicleId, customerId);
 
-    expect(card.jobCardNumber).toMatch(/^JC-\d{6}-\d{4}$/);
-    expect(card.jobCardNumber.endsWith(String(seeded + 1).padStart(4, '0'))).toBe(true);
+    expect(card.jobCardNumber).toMatch(/^JC-\d{6}-0001$/);
   });
 
   it('never reissues a number after a delete — the production duplicate', async () => {
@@ -101,7 +98,7 @@ describe('document numbering', () => {
     // issued and 0002 removed, the count is 2 and the "next" number is 0003.
     // Mongo issued the duplicate silently (no unique index on invoices);
     // Postgres refused it, which is how this surfaced right after cutover.
-    const { token, garageId } = await createGarageWithOwner('numbering-gap');
+    const { token } = await createGarageWithOwner('numbering-gap');
     const customerId = await makeCustomer(token);
     const plates = ['KA01GP0001', 'KA01GP0002', 'KA01GP0003'];
     const cards = [];
@@ -110,11 +107,10 @@ describe('document numbering', () => {
       cards.push(await makeJobCard(token, vehicleId, customerId));
     }
 
-    const seededInvoices = await countInGarage(schema.invoices, garageId);
     const first = await request(app).post('/api/invoices').set(authHeader(token)).send({ jobCardId: cards[0]._id });
     const second = await request(app).post('/api/invoices').set(authHeader(token)).send({ jobCardId: cards[1]._id });
     expect([first.status, second.status]).toEqual([201, 201]);
-    expect(second.body.data.invoiceNumber.endsWith(String(seededInvoices + 2).padStart(4, '0'))).toBe(true);
+    expect(second.body.data.invoiceNumber.endsWith('0002')).toBe(true);
 
     // Cancel the first invoice — the row is deleted and the count drops by one.
     const cancel = await request(app).delete(`/api/invoices/${first.body.data._id}`).set(authHeader(token));
@@ -123,7 +119,7 @@ describe('document numbering', () => {
     const third = await request(app).post('/api/invoices').set(authHeader(token)).send({ jobCardId: cards[2]._id });
     expect(third.status).toBe(201);
     expect(third.body.data.invoiceNumber).not.toBe(second.body.data.invoiceNumber);
-    expect(third.body.data.invoiceNumber.endsWith(String(seededInvoices + 3).padStart(4, '0'))).toBe(true);
+    expect(third.body.data.invoiceNumber.endsWith('0003')).toBe(true);
 
     // Same rule for job cards: delete the (now uninvoiced) first card, open another.
     const del = await request(app).delete(`/api/jobcards/${cards[0]._id}`).set(authHeader(token));
@@ -160,31 +156,5 @@ describe('document numbering', () => {
     const rows = await db.select({ n: schema.jobCards.jobCardNumber }).from(schema.jobCards)
       .where(eq(schema.jobCards.garageId, garageId));
     expect(new Set(rows.map(r => r.n)).size).toBe(rows.length);
-  });
-});
-
-describe('removing sample data with real rows hung off it', () => {
-  it('takes a job card opened on a demo car with it instead of failing', async () => {
-    const { token, garageId } = await createGarageWithOwner('sample-dep');
-
-    const sampleVehicle = await db.query.vehicles.findFirst({
-      where: eq(schema.vehicles.garageId, garageId)
-    });
-    // Close the seeded card on that vehicle first so a new one may open.
-    const openCard = await db.query.jobCards.findFirst({ where: eq(schema.jobCards.vehicleId, sampleVehicle!._id) });
-    if (openCard) {
-      await db.update(schema.jobCards).set({ status: 'cancelled' }).where(eq(schema.jobCards._id, openCard._id));
-    }
-
-    const realCard = await request(app).post('/api/jobcards').set(authHeader(token))
-      .send({ serviceType: 'repair', vehicle: sampleVehicle!._id, customer: sampleVehicle!.customerId, odometerAtIntake: 500 });
-    expect(realCard.status).toBe(201);
-
-    const res = await request(app).delete('/api/garage/sample-data').set(authHeader(token));
-
-    expect(res.status).toBe(200);
-    expect(res.body.data.customers).toBe(SAMPLE_CUSTOMERS.length);
-    expect(await countInGarage(schema.jobCards, garageId)).toBe(0);
-    expect(await countInGarage(schema.customers, garageId)).toBe(0);
   });
 });

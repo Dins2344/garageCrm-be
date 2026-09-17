@@ -93,12 +93,8 @@ export const generateInvoiceFromJobCard = async ({ jobCardId, garageId, userId }
   const jobCard = await requireJobCard(jobCardId, garageId);
   const { start, end } = todayRange();
 
-  // Sample rows never count against the quota — see the matching note in
-  // jobCardUsecase. The seeder raises one invoice, which would otherwise eat a
-  // third of a new owner's first-day allowance.
   const [{ todayCount }] = await db.select({ todayCount: count() }).from(invoices).where(and(
     eq(invoices.garageId, garageId),
-    eq(invoices.isSample, false),
     gte(invoices.createdAt, start),
     lt(invoices.createdAt, end)
   ));
@@ -148,17 +144,10 @@ export const generateInvoiceFromJobCard = async ({ jobCardId, garageId, userId }
   });
 
   // side effect 3: creating reminder for the delivered vehicle.
-  //
-  // Skipped for sample data. A seeded customer's phone number is fabricated
-  // from the country's placeholder format, so it is plausible enough to belong
-  // to a real person — and a reminder is what the cron later turns into an
-  // actual SMS. Demo rows must never reach a real handset.
-  if (!jobCard.isSample) {
-    try {
-      await reminderUsecase.autoCreateFromDelivery({ jobCard, garageId });
-    } catch (reminderErr) {
-      log.warn('Failed to auto-create service reminder', { error: (reminderErr as Error).message, jobCardId });
-    }
+  try {
+    await reminderUsecase.autoCreateFromDelivery({ jobCard, garageId });
+  } catch (reminderErr) {
+    log.warn('Failed to auto-create service reminder', { error: (reminderErr as Error).message, jobCardId });
   }
 
   log.info('New invoice generated', {

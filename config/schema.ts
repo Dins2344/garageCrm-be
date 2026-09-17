@@ -258,8 +258,6 @@ export const customers = pgTable('customers', {
   totalVisits: doublePrecision().notNull().default(0),
   totalSpent: doublePrecision().notNull().default(0),
   notes: text().notNull().default(''),
-  // Seeded demo row. A display and cleanup flag only — never access control.
-  isSample: boolean().notNull().default(false),
   ...timestamps
 }, (t) => [
   uniqueIndex('customers_garage_phone_unique').on(t.garageId, t.phone),
@@ -279,7 +277,6 @@ export const vehicles = pgTable('vehicles', {
   currentOdometerReading: doublePrecision().notNull().default(0),
   customerId: text().notNull().references(() => customers._id, { onDelete: 'restrict' }),
   garageId: text().notNull().references(() => garages._id, { onDelete: 'cascade' }),
-  isSample: boolean().notNull().default(false),
   ...timestamps
 }, (t) => [
   uniqueIndex('vehicles_garage_plate_unique').on(t.garageId, t.licensePlate),
@@ -329,7 +326,6 @@ export const jobCards = pgTable('job_cards', {
   createdById: text().references(() => users._id, { onDelete: 'set null' }),
   // Token used in the customer-facing estimation approval link.
   estimationToken: text(),
-  isSample: boolean().notNull().default(false),
   ...timestamps
 }, (t) => [
   uniqueIndex('job_cards_garage_number_unique').on(t.garageId, t.jobCardNumber),
@@ -360,7 +356,6 @@ export const invoices = pgTable('invoices', {
   paidAt: ts(),
   notes: text().notNull().default(''),
   createdById: text().references(() => users._id, { onDelete: 'set null' }),
-  isSample: boolean().notNull().default(false),
   ...timestamps
 }, (t) => [
   // Mongo never enforced this; the racy counter it replaced could not.

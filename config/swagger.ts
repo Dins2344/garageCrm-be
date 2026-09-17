@@ -263,7 +263,6 @@ const options: swaggerJsdoc.Options = {
           type: 'object',
           properties: {
             _id: { type: 'string' },
-            isSample: { type: 'boolean', example: false, description: 'Seeded demo row, removable via DELETE /garage/sample-data' },
             name: { type: 'string', example: 'Rahul Sharma' },
             phone: { type: 'string', example: '9876543210' },
             email: { type: 'string' },
@@ -294,7 +293,6 @@ const options: swaggerJsdoc.Options = {
           type: 'object',
           properties: {
             _id: { type: 'string' },
-            isSample: { type: 'boolean', example: false, description: 'Seeded demo row, removable via DELETE /garage/sample-data' },
             licensePlate: { type: 'string', example: 'MH01AB1234' },
             make: { type: 'string', example: 'Maruti' },
             model: { type: 'string', example: 'Swift' },
@@ -375,7 +373,6 @@ const options: swaggerJsdoc.Options = {
           properties: {
             _id: { type: 'string' },
             jobCardNumber: { type: 'string', example: 'JC-260512-0001' },
-            isSample: { type: 'boolean', example: false, description: 'Seeded demo row, removable via DELETE /garage/sample-data' },
             serviceType: { type: 'string', enum: ['service', 'repair', 'accident'] },
             vehicle: { $ref: '#/components/schemas/Vehicle' },
             customer: { $ref: '#/components/schemas/Customer' },
@@ -441,7 +438,6 @@ const options: swaggerJsdoc.Options = {
           properties: {
             _id: { type: 'string' },
             invoiceNumber: { type: 'string', example: 'INV-260512-0001' },
-            isSample: { type: 'boolean', example: false, description: 'Seeded demo row, removable via DELETE /garage/sample-data' },
             jobCard: { type: 'string' },
             customer: { $ref: '#/components/schemas/Customer' },
             vehicle: { $ref: '#/components/schemas/Vehicle' },
