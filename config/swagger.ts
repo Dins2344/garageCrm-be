@@ -101,6 +101,52 @@ const options: swaggerJsdoc.Options = {
           }
         },
 
+        // ─── Plans ───
+        PlanCatalog: {
+          type: 'object',
+          properties: {
+            country: { type: 'string', example: 'AE', description: "The country the prices were resolved for, or 'default'" },
+            currency: { type: 'string', example: 'AED' },
+            plans: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string', enum: ['free', 'plus', 'pro'] },
+                  name: { type: 'string', example: 'Plus' },
+                  tagline: { type: 'string' },
+                  features: { type: 'array', items: { type: 'string' } },
+                  limits: {
+                    type: 'object',
+                    description: 'null means unlimited',
+                    properties: {
+                      maxGaragesPerOwner: { type: 'integer', nullable: true },
+                      maxJobCardsPerGaragePerDay: { type: 'integer', nullable: true },
+                      maxInvoicesPerGaragePerDay: { type: 'integer', nullable: true },
+                      maxStaffPerGarage: { type: 'integer', nullable: true }
+                    }
+                  },
+                  price: {
+                    type: 'object',
+                    description: 'Major units of `currency`; 0 for Free',
+                    properties: {
+                      monthly: { type: 'number', example: 49 },
+                      annual: { type: 'number', example: 490 }
+                    }
+                  }
+                }
+              }
+            },
+            purchasing: {
+              type: 'object',
+              properties: {
+                enabled: { type: 'boolean', example: false },
+                message: { type: 'string', example: 'Paid subscriptions will be enabled soon.' }
+              }
+            }
+          }
+        },
+
         // ─── Auth ───
         LoginRequest: {
           type: 'object',

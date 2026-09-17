@@ -3,7 +3,7 @@ import request from 'supertest';
 import app from '../app';
 import { schema, findById } from './helpers/dbAccess';
 import { resolveGarageLocale } from '../utils/locale';
-import { COUNTRIES } from '../config/countries';
+import { COUNTRIES, LAUNCH_COUNTRY_CODES, getCountryOptions, isSupportedCountry } from '../config/countries';
 import { registerGarageOwner, createGarageWithOwner, addGarageToOwner, nextPhone, authHeader } from './helpers/factories';
 
 describe('resolveGarageLocale', () => {
@@ -108,6 +108,35 @@ describe('Country-aware registration', () => {
     expect(garage!.settings.currency).toBe('');
   });
 
+  // The September 2026 launch markets. Each registers with its own phone
+  // example (the number the picker shows must itself be valid), resolves its
+  // own currency and tax label, and seeds its own rate — the whole point of
+  // the table: a Qatari garage must not come out as an Indian one.
+  it.each([
+    ['LK', 'LKR', 'VAT', 'VAT No.', 18, '071 234 5678'],
+    ['SA', 'SAR', 'VAT', 'VAT Registration No.', 15, '050 123 4567'],
+    ['BH', 'BHD', 'VAT', 'VAT Account No.', 10, '3600 1234'],
+    ['QA', 'QAR', 'VAT', 'TIN', 0, '3312 3456'],
+    ['KW', 'KWD', 'VAT', 'Commercial Licence No.', 0, '5012 3456'],
+    ['NP', 'NPR', 'VAT', 'PAN', 13, '984 123 4567'],
+  ])('registers a %s garage with %s, %s and its own tax rate', async (country, currency, taxLabel, taxIdLabel, taxRate, phone) => {
+    const res = await request(app).post('/api/auth/register').send({
+      name: `${country} Owner`,
+      email: `${country.toLowerCase()}-owner@example.com`,
+      phone,
+      password: 'password123',
+      garageName: `${country} Motors`,
+      garagePhone: phone,
+      country,
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.locale).toMatchObject({ country, currency, taxLabel, taxIdLabel });
+
+    const garage = await findById(schema.garages, res.body.data.garage);
+    expect(garage!.settings.taxRate).toBe(taxRate);
+  });
+
   it('rejects an unsupported country', async () => {
     const res = await request(app).post('/api/auth/register').send({
       name: 'Nowhere Owner',
@@ -160,10 +189,21 @@ describe('Locale on API payloads', () => {
     expect(res.status).toBe(200);
     const india = res.body.data.find((c: { code: string }) => c.code === 'IN');
     expect(india).toMatchObject({ name: 'India', currency: 'INR', taxLabel: 'GST' });
-    // Multi-zone countries must tell the UI to ask for a timezone.
-    const us = res.body.data.find((c: { code: string }) => c.code === 'US');
-    expect(us.requiresTimezoneChoice).toBe(true);
     expect(india.requiresTimezoneChoice).toBe(false);
+    // Multi-zone countries must tell the UI to ask for a timezone. None of the
+    // launch markets spans zones, so check the option builder's source directly.
+    expect(getCountryOptions().every(c => c.requiresTimezoneChoice === (COUNTRIES[c.code].timezone === null))).toBe(true);
+    expect(COUNTRIES.US.timezone).toBeNull();
+  });
+
+  it('offers only the Play Store launch markets in the picker', async () => {
+    const res = await request(app).get('/api/meta/countries');
+    const codes = res.body.data.map((c: { code: string }) => c.code);
+    expect(codes).toEqual(['IN', 'LK', 'AE', 'SA', 'BH', 'QA', 'KW', 'NP']);
+    expect(codes).toEqual([...LAUNCH_COUNTRY_CODES]);
+    // Hidden from the picker, still a valid country for garages that already have it.
+    expect(codes).not.toContain('GB');
+    expect(isSupportedCountry('GB')).toBe(true);
   });
 });
 

@@ -158,6 +158,62 @@ export const COUNTRIES = {
     postalLabel: 'Postal Code', postalInputMode: 'numeric',
     phoneExample: '0802 123 4567', timezone: 'Africa/Lagos',
   },
+
+  // ── Launch markets, September 2026 ────────────────────────────────────
+  // Qatar and Kuwait have no consumption tax today (both have announced
+  // VAT without a date), so the label is still 'VAT' for the day it lands
+  // and the rate is 0 — an owner there sees no tax line until they set one.
+  // BHD and KWD carry three decimal places: Intl formats them correctly,
+  // but the estimation maths still rounds to 2dp — see docs/
+  // subscriptions-and-payments-plan.md, section 1.
+  LK: {
+    name: 'Sri Lanka',
+    currency: 'LKR', locale: 'en-LK',
+    taxLabel: 'VAT', taxIdLabel: 'VAT No.',
+    defaultTaxRate: 18, defaultLaborRatePerHour: 1500,
+    postalLabel: 'Postal Code', postalInputMode: 'numeric',
+    phoneExample: '071 234 5678', timezone: 'Asia/Colombo',
+  },
+  SA: {
+    name: 'Saudi Arabia',
+    currency: 'SAR', locale: 'en-SA',
+    taxLabel: 'VAT', taxIdLabel: 'VAT Registration No.',
+    defaultTaxRate: 15, defaultLaborRatePerHour: 150,
+    postalLabel: 'Postal Code', postalInputMode: 'numeric',
+    phoneExample: '050 123 4567', timezone: 'Asia/Riyadh',
+  },
+  BH: {
+    name: 'Bahrain',
+    currency: 'BHD', locale: 'en-BH',
+    taxLabel: 'VAT', taxIdLabel: 'VAT Account No.',
+    defaultTaxRate: 10, defaultLaborRatePerHour: 15,
+    postalLabel: 'Block / Postal Code', postalInputMode: 'numeric',
+    phoneExample: '3600 1234', timezone: 'Asia/Bahrain',
+  },
+  QA: {
+    name: 'Qatar',
+    currency: 'QAR', locale: 'en-QA',
+    taxLabel: 'VAT', taxIdLabel: 'TIN',
+    defaultTaxRate: 0, defaultLaborRatePerHour: 150,
+    postalLabel: 'PO Box', postalInputMode: 'text',
+    phoneExample: '3312 3456', timezone: 'Asia/Qatar',
+  },
+  KW: {
+    name: 'Kuwait',
+    currency: 'KWD', locale: 'en-KW',
+    taxLabel: 'VAT', taxIdLabel: 'Commercial Licence No.',
+    defaultTaxRate: 0, defaultLaborRatePerHour: 12,
+    postalLabel: 'Postal Code', postalInputMode: 'numeric',
+    phoneExample: '5012 3456', timezone: 'Asia/Kuwait',
+  },
+  NP: {
+    name: 'Nepal',
+    currency: 'NPR', locale: 'en-NP',
+    taxLabel: 'VAT', taxIdLabel: 'PAN',
+    defaultTaxRate: 13, defaultLaborRatePerHour: 800,
+    postalLabel: 'Postal Code', postalInputMode: 'numeric',
+    phoneExample: '984 123 4567', timezone: 'Asia/Kathmandu',
+  },
 } as const satisfies Record<string, CountryConfig>;
 
 export type CountryCode = keyof typeof COUNTRIES;
@@ -167,9 +223,38 @@ export const SUPPORTED_COUNTRY_CODES = Object.keys(COUNTRIES) as CountryCode[];
 export const isSupportedCountry = (code?: string | null): code is CountryCode =>
   !!code && Object.prototype.hasOwnProperty.call(COUNTRIES, code);
 
-/** Country list for pickers — no seed-only fields, which aren't UI concerns. */
+/**
+ * The countries offered in the signup and settings pickers: the Play Store
+ * launch markets. The rest of the table stays valid (existing garages,
+ * tests, the timezone-choice path) but is not offered to new owners until
+ * the app is published there — uncomment a code to open it.
+ */
+export const LAUNCH_COUNTRY_CODES: readonly CountryCode[] = [
+  'IN',
+  'LK',
+  'AE',
+  'SA',
+  'BH',
+  'QA',
+  'KW',
+  'NP',
+  // Not published on Play yet:
+  // 'US',
+  // 'GB',
+  // 'CA',
+  // 'AU',
+  // 'SG',
+  // 'NZ',
+  // 'IE',
+  // 'ZA',
+  // 'MY',
+  // 'KE',
+  // 'NG',
+];
+
+/** Country list for pickers — launch markets only, no seed-only fields (not UI concerns). */
 export const getCountryOptions = () =>
-  SUPPORTED_COUNTRY_CODES.map(code => ({
+  LAUNCH_COUNTRY_CODES.map(code => ({
     code,
     name: COUNTRIES[code].name,
     currency: COUNTRIES[code].currency,

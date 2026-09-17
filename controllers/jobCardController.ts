@@ -7,7 +7,8 @@ const log = logger.child('JobCardController');
 // @route   GET /api/jobcards
 export const getJobCards = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { status, mechanicId, vehicle, search, page, limit } = req.query as Record<string, string | undefined>;
+    // `status` may be repeated (`?status=a&status=b`), which Express parses to an array.
+    const { status, mechanicId, vehicle, search, page, limit } = req.query as Record<string, string | string[] | undefined>;
     const garageId = req.garageId!;
     log.info('Fetching job cards list', { garageId, status, mechanicId, vehicle, search, page, limit });
 
@@ -16,11 +17,11 @@ export const getJobCards = async (req: Request, res: Response, next: NextFunctio
       role: req.user!.role,
       userId: req.user!._id,
       status,
-      mechanicId,
-      vehicleId: vehicle,
-      search,
-      page,
-      limit
+      mechanicId: Array.isArray(mechanicId) ? mechanicId[0] : mechanicId,
+      vehicleId: Array.isArray(vehicle) ? vehicle[0] : vehicle,
+      search: Array.isArray(search) ? search[0] : search,
+      page: Array.isArray(page) ? page[0] : page,
+      limit: Array.isArray(limit) ? limit[0] : limit
     });
 
     log.info('Job cards list fetched', { garageId, count: jobCards.length, total });
