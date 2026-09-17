@@ -1,8 +1,5 @@
-// Free-tier usage caps. There is only one plan today; when paid subscriptions
-// launch, this becomes a lookup keyed by the owner's plan instead of a flat export.
-export const FREE_PLAN_LIMITS = {
-  maxGaragesPerOwner: 2,
-  maxJobCardsPerGaragePerDay: 3,
-  maxInvoicesPerGaragePerDay: 3,
-  maxStaffPerGarage: 2
-} as const;
+// The Free-tier caps every quota check reads. They now come from the plan
+// catalog in `config/plans.ts` — the single table both clients render — and
+// this module exists only so the four usecases that import
+// `FREE_PLAN_LIMITS` keep their import unchanged.
+export { FREE_PLAN_LIMITS } from './plans';

@@ -16,14 +16,14 @@ import * as reminderUsecase from './reminderUsecase';
 import { sendEstimationEmail } from '../services/emailService';
 import * as pdfService from '../services/pdfService';
 import { runSchema } from '../utils/validation';
-import { containsPattern, pagination } from '../utils/query';
+import { containsPattern, listParam, pagination } from '../utils/query';
 import { nextJobCardNumber } from '../utils/numbering';
 import { todayRange } from '../utils/dates';
 import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { resolveGarageLocale } from '../utils/locale';
-import { Role, TERMINAL_JOB_STATUSES } from '../types/domain';
+import { JOB_STATUSES, JobStatus, Role, TERMINAL_JOB_STATUSES } from '../types/domain';
 import { FREE_PLAN_LIMITS } from '../config/planLimits';
 
 const log = logger.child('JobCardUsecase');
@@ -74,7 +74,8 @@ interface ListInput {
   garageId: string;
   role: Role;
   userId: string;
-  status?: string;
+  /** One status, a comma-separated list, or an array — see `listParam`. */
+  status?: string | string[];
   mechanicId?: string;
   vehicleId?: string;
   search?: string;
@@ -82,15 +83,26 @@ interface ListInput {
   limit?: number | string;
 }
 
+const isJobStatus = (value: string): value is JobStatus => (JOB_STATUSES as readonly string[]).includes(value);
+
+/** The statuses a list request asked for, or [] for all. An unknown value is a 400, not an empty list. */
+const statusFilter = (raw: string | string[] | undefined): JobStatus[] => {
+  const values = listParam(raw);
+  const unknown = values.filter(v => !isJobStatus(v));
+  if (unknown.length) throw new HttpError(`Status must be one of: ${JOB_STATUSES.join(', ')}`, 400);
+  return values.filter(isJobStatus);
+};
+
 export const getActivityList = async ({ garageId, role, userId, status, mechanicId, vehicleId, search, page = 1, limit = 20 }: ListInput) => {
   const paging = pagination(page, limit);
 
   const mechanicFilter = role === 'mechanic' ? userId : mechanicId;
+  const statuses = statusFilter(status);
   const where = and(
     eq(jobCards.garageId, garageId),
     mechanicFilter ? eq(jobCards.assignedMechanicId, mechanicFilter) : undefined,
     vehicleId ? eq(jobCards.vehicleId, vehicleId) : undefined,
-    status ? eq(jobCards.status, status) : undefined,
+    statuses.length ? inArray(jobCards.status, statuses) : undefined,
     search ? ilike(jobCards.jobCardNumber, containsPattern(search)) : undefined
   );
 

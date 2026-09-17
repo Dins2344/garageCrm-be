@@ -415,9 +415,13 @@
  *     parameters:
  *       - in: query
  *         name: status
+ *         description: >-
+ *           One status, or several comma-separated (`new,approved`) to match any of them.
+ *           Values are new, estimation_sent, approved, in_progress, quality_check,
+ *           ready_for_pickup, delivered, cancelled; an unknown value is a 400.
  *         schema:
  *           type: string
- *           enum: [new, estimation_sent, approved, in_progress, quality_check, ready_for_pickup, delivered, cancelled]
+ *           example: new,approved
  *       - in: query
  *         name: mechanicId
  *         schema:
@@ -1416,10 +1420,13 @@
  * /meta/countries:
  *   get:
  *     tags: [Meta]
- *     summary: Supported countries for the signup and settings pickers
+ *     summary: Countries offered in the signup and settings pickers
  *     description: >
  *       Unauthenticated on purpose — the registration form needs this before a
  *       user exists. Static reference data; clients cache it per page load.
+ *       Lists the Play Store launch markets only (`LAUNCH_COUNTRY_CODES`);
+ *       other countries in the table remain valid for garages that already
+ *       have them but are not offered to new owners.
  *     security: []
  *     responses:
  *       200:
@@ -1434,6 +1441,37 @@
  *                   type: array
  *                   items:
  *                     $ref: '#/components/schemas/CountryOption'
+ */
+
+/**
+ * @swagger
+ * /meta/plans:
+ *   get:
+ *     tags: [Meta]
+ *     summary: The Free / Plus / Pro catalog with prices for a country
+ *     description: >
+ *       Unauthenticated — the Pricing page is readable before signing in.
+ *       Prices are fixed local price points per country, never a live FX
+ *       conversion; an unknown or omitted country resolves to the USD
+ *       defaults. `purchasing.enabled` is false until payments exist, and
+ *       `purchasing.message` is what both clients show on the plan buttons
+ *       instead of a checkout, so enabling purchasing needs no app release.
+ *     security: []
+ *     parameters:
+ *       - in: query
+ *         name: country
+ *         schema: { type: string, example: 'AE' }
+ *         description: ISO 3166-1 alpha-2 of the garage; resolves the currency and price points
+ *     responses:
+ *       200:
+ *         description: Plan catalog
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { $ref: '#/components/schemas/PlanCatalog' }
  */
 
 // ════════════════════════════════════════
