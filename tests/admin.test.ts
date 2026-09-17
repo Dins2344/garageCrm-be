@@ -4,7 +4,6 @@ import app from '../app';
 import { db, schema, findById } from './helpers/dbAccess';
 import { newId } from '../utils/ids';
 import { createGarageWithOwner, nextPhone, authHeader, loginAsSuperAdmin, adminHeader } from './helpers/factories';
-import { SAMPLE_CUSTOMERS, SAMPLE_JOB_CARDS, SAMPLE_VEHICLES } from '../config/sampleData';
 
 const adminLogin = loginAsSuperAdmin;
 
@@ -108,15 +107,11 @@ describe('Admin: delete user', () => {
     expect(del.status).toBe(200);
     expect(del.body.data.deletedUser.role).toBe('owner');
     expect(del.body.data.cascadedGarages).toBe(1);
-    // Counts are the rows created above PLUS the demo dataset every garage is
-    // seeded with at registration. Expressed against the fixtures rather than as
-    // literals so growing the sample set does not silently look like a cascade
-    // regression here.
     expect(del.body.data.cascadedCounts).toMatchObject({
       users: 2, // owner + the one staff member
-      customers: 1 + SAMPLE_CUSTOMERS.length,
-      vehicles: 1 + SAMPLE_VEHICLES.length,
-      jobCards: 1 + SAMPLE_JOB_CARDS.length,
+      customers: 1,
+      vehicles: 1,
+      jobCards: 1,
       inventory: 1,
       reminders: 1
     });

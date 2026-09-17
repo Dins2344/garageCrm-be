@@ -146,13 +146,8 @@ export const openJobCard = async ({ jobCardData, garageId, userId }: OpenInput):
   const input = runSchema(createJobCardSchema, jobCardData);
   const { start, end } = todayRange();
 
-  // Sample rows never count against the quota. They are seeded by the system at
-  // registration, so counting them would spend a new owner's entire first-day
-  // allowance before they had created anything — the free plan allows 3 job
-  // cards a day and the seeder writes 5.
   const [{ todayCount }] = await db.select({ todayCount: count() }).from(jobCards).where(and(
     eq(jobCards.garageId, garageId),
-    eq(jobCards.isSample, false),
     gte(jobCards.createdAt, start),
     lt(jobCards.createdAt, end)
   ));
@@ -329,8 +324,7 @@ interface EstimationInput {
  * (`frontend/src/pages/JobCardDetail.tsx`, `mobile/src/screens/EstimationEditorScreen.tsx`)
  * and must round to 2dp identically; `tests/taxParity.test.ts` pins that.
  * Extracted as a pure function so anything server-side needing totals calls it
- * rather than becoming a fourth copy — `sampleDataUsecase` is the first such
- * caller.
+ * rather than becoming a fourth copy.
  *
  * Note the deliberate asymmetry: `subtotal` is returned unrounded while
  * `taxAmount` and `grandTotal` round to 2dp. That is the existing behaviour and

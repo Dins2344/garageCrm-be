@@ -239,41 +239,6 @@ on every object, and a published mobile build cannot be forced to upgrade, so:
   first request after a quiet spell pays a cold start of roughly a second.
   The app uses the pooled connection string with `Pool({ max: 5 })`.
 
-## New garages are seeded, and `isSample` is not a security boundary
-
-`registerNewGarage` calls `seedSampleData`, which writes three customers, four
-vehicles, five job cards across five statuses and one paid invoice. It exists
-because a new account used to open on six empty screens — you had to invent a
-customer, a vehicle and a job card before the product did anything, and nobody
-evaluating the app does that.
-
-- **`isSample` is a display and cleanup flag only.** `garage` remains the sole
-  tenant boundary on every query. Never write `find({ isSample: false })` and
-  treat it as scoping.
-- **Seeding failure never fails registration.** The `try/catch` in
-  `registerNewGarage` is deliberate and is the opposite of the `User` rollback
-  directly above it: that one protects an invariant, this one protects a signup
-  from a nicety. `tests/sampleData.test.ts` pins it by making the seeder reject.
-- **Sample rows do not count against the free-plan daily quotas.** The plan
-  allows 3 job cards a day and the seeder writes 5, so counting them would lock
-  a new owner out of creating anything on their first day. Both `jobCardUsecase`
-  and `invoiceUsecase` exclude `isSample` from their `todayCount`.
-- **A delivered sample job card creates no service reminder.** Seed phone
-  numbers are derived from the country's placeholder format, so they are
-  plausible enough to belong to a real person, and a reminder is what the cron
-  later turns into a real SMS. `generateInvoiceFromJobCard` skips
-  `autoCreateFromDelivery` when `jobCard.isSample`.
-- **Nothing here is a currency amount.** Part prices are multiples of the
-  garage's own `laborRatePerHour`, and phone numbers derive from
-  `COUNTRIES[code].phoneExample` — see the header of `config/sampleData.ts` for
-  why that beats thirteen hand-written variants.
-- **`removeSampleData` runs in one transaction and takes dependents with it.**
-  A job card a tester opened on a demo car, or a vehicle they added to a demo
-  customer, goes too whatever its own flag says — a job card on a car that
-  never existed is demo data, and the RESTRICT foreign keys would otherwise
-  refuse the removal outright. Real rows attached to real customers are never
-  touched.
-
 ## Owner verification
 
 `usecases/verificationUsecase.ts` lets an **owner** (only — `authorize('owner')`
