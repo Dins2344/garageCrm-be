@@ -1,7 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 const router = express.Router();
-import { register, login, getMe, updateProfile, updatePassword, logout, forgotPassword, resetPassword } from '../controllers/authController';
+import { register, login, getMe, updateProfile, updatePassword, logout, forgotPassword, resetPassword, deleteAccount } from '../controllers/authController';
 import { getStatus, sendCode, confirmCode } from '../controllers/verificationController';
 import { protect, authorize } from '../middleware/auth';
 import asyncHandler from '../middleware/asyncHandler';
@@ -11,6 +11,15 @@ const passwordResetLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
   message: { success: false, message: 'Too many password reset attempts. Please try again later.' },
+  skip: () => process.env.NODE_ENV === 'test'
+});
+
+// Five wrong passwords per quarter hour is plenty for a real owner and not
+// enough to brute-force a hijacked session into deleting the account.
+const accountDeleteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { success: false, message: 'Too many attempts. Please try again later.' },
   skip: () => process.env.NODE_ENV === 'test'
 });
 
@@ -30,6 +39,7 @@ router.get('/me', protect, asyncHandler(getMe));
 router.put('/profile', protect, asyncHandler(updateProfile));
 router.put('/changepassword', protect, asyncHandler(updatePassword));
 router.put('/updatepassword', protect, asyncHandler(updatePassword));
+router.delete('/account', protect, accountDeleteLimiter, asyncHandler(deleteAccount));
 router.post('/forgotpassword', passwordResetLimiter, asyncHandler(forgotPassword));
 router.put('/resetpassword/:token', passwordResetLimiter, asyncHandler(resetPassword));
 

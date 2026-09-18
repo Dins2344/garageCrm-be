@@ -143,6 +143,27 @@ export const updatePassword = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+// @desc    Delete your own account (owners: every garage they own goes too)
+// @route   DELETE /api/auth/account
+export const deleteAccount = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    log.info('Account deletion requested', { userId: req.user?._id, role: req.user?.role });
+    const { garagesDeleted } = await authUsecase.deleteOwnAccount({
+      userId: String(req.user!._id),
+      password: req.body?.password
+    });
+    log.info('Account deleted', { userId: req.user?._id, garagesDeleted });
+    // The session is dead either way; drop the cookie so the browser agrees.
+    res
+      .cookie('token', 'none', { expires: new Date(Date.now() + 10 * 1000), httpOnly: true })
+      .status(200)
+      .json({ success: true, message: 'Your account has been deleted' });
+  } catch (error) {
+    log.warn('Account deletion failed', { userId: req.user?._id, error: (error as Error).message });
+    next(error);
+  }
+};
+
 // @desc    Request a password reset email (owners only)
 // @route   POST /api/auth/forgotpassword
 export const forgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {

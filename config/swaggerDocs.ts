@@ -1171,6 +1171,40 @@
 
 /**
  * @swagger
+ * /auth/account:
+ *   delete:
+ *     tags: [Auth]
+ *     summary: Delete your own account
+ *     description: >
+ *       Self-service deletion, confirmed by re-entering the password. An owner's
+ *       deletion removes every garage they own and everything in those garages
+ *       (staff, customers, vehicles, job cards, invoices, reminders). A staff
+ *       member's deletion removes only their user; job cards they worked keep
+ *       their history with the mechanic / advisor reference cleared. The session
+ *       cookie is cleared; any bearer token stops working because the user no
+ *       longer exists. Rate limited to five attempts per 15 minutes per IP.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [password]
+ *             properties:
+ *               password:
+ *                 type: string
+ *                 description: The caller's current password
+ *     responses:
+ *       200:
+ *         description: Account deleted
+ *       401:
+ *         description: Password incorrect
+ *       429:
+ *         description: Too many attempts
+ */
+
+/**
+ * @swagger
  * /auth/verification:
  *   get:
  *     tags: [Auth]

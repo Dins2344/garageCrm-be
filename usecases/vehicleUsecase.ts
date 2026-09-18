@@ -1,10 +1,10 @@
-import { and, count, desc, eq, ilike } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, or } from 'drizzle-orm';
 import { db } from '../config/db';
 import { vehicles, createVehicleSchema, updateVehicleSchema, vehicleToApi } from '../models/Vehicle';
 import { customers } from '../models/Customer';
 import { jobCards, jobCardSummaryToApi } from '../models/JobCard';
 import { runSchema } from '../utils/validation';
-import { containsPattern, pagination } from '../utils/query';
+import { pagination, plateMatches, textMatches } from '../utils/query';
 import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
@@ -18,10 +18,27 @@ interface ListInput {
   limit?: number | string;
 }
 
+/**
+ * The vehicle-list search: plate (ignoring spaces, so "kl07bq" finds
+ * "KL 07 BQ 4521"), make, model, or the owner's name. Exported so the job
+ * card list can reuse it as a sub-select.
+ */
+export const vehicleSearchCondition = (garageId: string, search: string) => or(
+  plateMatches(vehicles.licensePlate, search),
+  textMatches(vehicles.make, search),
+  textMatches(vehicles.model, search),
+  inArray(
+    vehicles.customerId,
+    db.select({ id: customers._id }).from(customers)
+      .where(and(eq(customers.garageId, garageId), textMatches(customers.name, search)))
+  )
+);
+
 export const getVehiclesList = async ({ garageId, search, page = 1, limit = 20 }: ListInput) => {
   const paging = pagination(page, limit);
-  const where = search
-    ? and(eq(vehicles.garageId, garageId), ilike(vehicles.licensePlate, containsPattern(search)))
+  const term = search?.trim();
+  const where = term
+    ? and(eq(vehicles.garageId, garageId), vehicleSearchCondition(garageId, term))
     : eq(vehicles.garageId, garageId);
 
   const [{ total }] = await db.select({ total: count() }).from(vehicles).where(where);
