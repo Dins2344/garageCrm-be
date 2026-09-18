@@ -37,7 +37,7 @@ import {
   AnyPgColumn
 } from 'drizzle-orm/pg-core';
 import { newId } from '../utils/ids';
-import { Role, VerificationChannel } from '../types/domain';
+import { ExpenseCategory, PaymentMethod, Role, VerificationChannel } from '../types/domain';
 
 // ─── JSON shapes ──────────────────────────────────────────────────────────
 
@@ -388,6 +388,26 @@ export const serviceReminders = pgTable('service_reminders', {
 
 // ─── Relations (what `.populate()` used to walk) ──────────────────────────
 
+/**
+ * Money going out, so the dashboard can show profit and not just revenue.
+ * Owner/admin only. `expenseDate` is when the money left, which is what a
+ * month's profit is about; `createdAt` is merely when it was typed in.
+ */
+export const expenses = pgTable('expenses', {
+  _id: idColumn(),
+  garageId: text().notNull().references(() => garages._id, { onDelete: 'cascade' }),
+  title: text().notNull(),
+  category: text().$type<ExpenseCategory>().notNull().default('other'),
+  amount: doublePrecision().notNull(),
+  expenseDate: ts().notNull(),
+  paymentMethod: text().$type<PaymentMethod>().notNull().default(''),
+  notes: text().notNull().default(''),
+  createdById: text().references(() => users._id, { onDelete: 'set null' }),
+  ...timestamps
+}, (t) => [
+  index('expenses_garage_date_idx').on(t.garageId, t.expenseDate)
+]);
+
 export const garagesRelations = relations(garages, ({ one, many }) => ({
   owner: one(users, { fields: [garages.ownerId], references: [users._id], relationName: 'garageOwner' }),
   staff: many(users, { relationName: 'userGarage' })
@@ -428,6 +448,11 @@ export const invoicesRelations = relations(invoices, ({ one }) => ({
   vehicle: one(vehicles, { fields: [invoices.vehicleId], references: [vehicles._id] }),
   garage: one(garages, { fields: [invoices.garageId], references: [garages._id] }),
   createdBy: one(users, { fields: [invoices.createdById], references: [users._id], relationName: 'invoiceCreator' })
+}));
+
+export const expensesRelations = relations(expenses, ({ one }) => ({
+  garage: one(garages, { fields: [expenses.garageId], references: [garages._id] }),
+  createdBy: one(users, { fields: [expenses.createdById], references: [users._id] })
 }));
 
 export const serviceRemindersRelations = relations(serviceReminders, ({ one }) => ({

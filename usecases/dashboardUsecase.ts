@@ -8,6 +8,10 @@ import { inventory } from '../models/Inventory';
 import { serviceReminders, reminderToApi } from '../models/ServiceReminder';
 import { garages } from '../models/Garage';
 import { users } from '../models/User';
+import { expenses } from '../models/Expense';
+import { monthKey, monthRange, previousMonthKey } from '../utils/dates';
+import { EXPENSE_CATEGORIES, ExpenseCategory } from '../types/domain';
+import { HttpError } from '../utils/httpError';
 import logger from '../utils/logger';
 import { resolveGarageLocale } from '../utils/locale';
 import { formatDate } from '../utils/format';
@@ -318,4 +322,81 @@ export const getChartData = async ({ garageId, startDate, endDate, groupBy }: Ch
   jobStatusRaw.forEach(s => { jobStatusBreakdown[s.status] = s.count; });
 
   return { revenueTrend: periods, jobStatusBreakdown };
+};
+
+// ── Monthly business metrics ─────────────────────────────────────────────────
+
+interface MonthlyInput {
+  garageId: string;
+  /** `YYYY-MM`; defaults to the current month. */
+  month?: string;
+}
+
+interface MonthFigures {
+  month: string;
+  /** Paid invoices, by the date they were paid. */
+  revenue: number;
+  /** Job cards billed in the month — an invoice is what makes a service a service. */
+  services: number;
+  /** Everything recorded in expenses, by expense date. */
+  expenses: number;
+  /** revenue - expenses. Negative when the month lost money. */
+  netProfit: number;
+}
+
+const figuresFor = async (garageId: string, month: string): Promise<MonthFigures> => {
+  const range = monthRange(month)!;
+  const [[paid], [billed], [spent]] = await Promise.all([
+    db.select({ total: sum(invoices.grandTotal) }).from(invoices).where(and(
+      eq(invoices.garageId, garageId), eq(invoices.paymentStatus, 'paid'),
+      gte(invoices.paidAt, range.start), lt(invoices.paidAt, range.end)
+    )),
+    db.select({ total: count() }).from(invoices).where(and(
+      eq(invoices.garageId, garageId), gte(invoices.createdAt, range.start), lt(invoices.createdAt, range.end)
+    )),
+    db.select({ total: sum(expenses.amount) }).from(expenses).where(and(
+      eq(expenses.garageId, garageId), gte(expenses.expenseDate, range.start), lt(expenses.expenseDate, range.end)
+    ))
+  ]);
+  const revenue = Number(paid?.total) || 0;
+  const spentTotal = Number(spent?.total) || 0;
+  return {
+    month,
+    revenue,
+    services: billed?.total || 0,
+    expenses: spentTotal,
+    netProfit: Math.round((revenue - spentTotal) * 100) / 100
+  };
+};
+
+/**
+ * The month at a glance: revenue, services, expenses, profit — for the month
+ * asked for and the one before it so a client can show the change. Expense
+ * categories are broken out because "where did it go" is the next question.
+ */
+export const compileMonthlyMetrics = async ({ garageId, month }: MonthlyInput) => {
+  const key = month || monthKey(new Date());
+  const range = monthRange(key);
+  if (!range) throw new HttpError('Month must be YYYY-MM', 400);
+
+  const [current, previous, byCategory] = await Promise.all([
+    figuresFor(garageId, key),
+    figuresFor(garageId, previousMonthKey(key)),
+    db.select({ category: expenses.category, total: sum(expenses.amount), count: count() }).from(expenses)
+      .where(and(eq(expenses.garageId, garageId), gte(expenses.expenseDate, range.start), lt(expenses.expenseDate, range.end)))
+      .groupBy(expenses.category)
+  ]);
+
+  const totals = new Map<ExpenseCategory, { total: number; count: number }>(
+    byCategory.map(r => [r.category, { total: Number(r.total) || 0, count: r.count }])
+  );
+
+  return {
+    ...current,
+    previous,
+    expensesByCategory: EXPENSE_CATEGORIES
+      .map(category => ({ category, total: totals.get(category)?.total || 0, count: totals.get(category)?.count || 0 }))
+      .filter(c => c.count > 0)
+      .sort((a, b) => b.total - a.total)
+  };
 };

@@ -64,7 +64,7 @@ describe('account deletion', () => {
     const res = await del(g.token, { password: 'password123' });
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/deleted/i);
-    expect(res.headers['set-cookie']?.join(';')).toMatch(/token=none/);
+    expect(String(res.headers['set-cookie'])).toMatch(/token=none/);
 
     // The owner, both garages and every tenant row are gone.
     expect(await findById(users, g.userId)).toBeNull();

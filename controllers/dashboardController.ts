@@ -50,3 +50,18 @@ export const getChartData = async (req: Request, res: Response, next: NextFuncti
     next(error);
   }
 };
+
+// @desc    Monthly business metrics (owner, admin)
+// @route   GET /api/dashboard/monthly?month=YYYY-MM
+export const getMonthlyMetrics = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const month = req.query.month;
+    const data = await dashboardUsecase.compileMonthlyMetrics({
+      garageId: req.garageId!,
+      month: typeof month === 'string' ? month : undefined
+    });
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};

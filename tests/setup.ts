@@ -46,7 +46,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   await pglite.exec(
-    'TRUNCATE TABLE admins, app_releases, garages, users, verification_challenges, customers, vehicles, inventory, job_cards, invoices, service_reminders CASCADE'
+    'TRUNCATE TABLE admins, app_releases, garages, users, verification_challenges, customers, vehicles, inventory, job_cards, invoices, service_reminders, expenses CASCADE'
   );
 });
 
