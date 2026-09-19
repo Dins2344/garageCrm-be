@@ -6,6 +6,7 @@ import {
   signUserToken, userToApi
 } from '../models/User';
 import { garages, createGarageSchema } from '../models/Garage';
+import type { Role } from '../types/domain';
 import { hashPassword, comparePassword } from '../utils/password';
 import { runSchema } from '../utils/validation';
 import { newId } from '../utils/ids';
@@ -213,6 +214,43 @@ export const changeUserPassword = async ({ userId, currentPassword, newPassword 
   const password = runSchema(passwordField, newPassword);
   await db.update(users).set({ password: await hashPassword(password) }).where(eq(users._id, userId));
   return true;
+};
+
+interface DeleteAccountInput {
+  userId: string;
+  password: string;
+}
+
+/**
+ * Self-service account deletion (a Play Store requirement). Password
+ * re-entry is the confirmation — a stolen session must not be enough.
+ *
+ * Owners take their garages with them: every garage they own is deleted and
+ * the `garage_id ... ON DELETE CASCADE` chain removes its staff, customers,
+ * vehicles, job cards, invoices and reminders. Staff lose only their own
+ * row; the job cards they worked keep their history because the mechanic,
+ * advisor and created-by references are `ON DELETE SET NULL`.
+ */
+export const deleteOwnAccount = async ({ userId, password }: DeleteAccountInput): Promise<{ role: Role; garagesDeleted: number }> => {
+  const user = await db.query.users.findFirst({ where: eq(users._id, userId) });
+  if (!user || !(await comparePassword(password || '', user.password))) {
+    throw new HttpError('Password is incorrect', 401);
+  }
+
+  const garagesDeleted = await db.transaction(async tx => {
+    let removed = 0;
+    if (user.role === 'owner') {
+      const owned = await tx.delete(garages).where(eq(garages.ownerId, userId)).returning({ id: garages._id });
+      removed = owned.length;
+    }
+    // Staff rows in those garages are already gone by cascade; for an
+    // owner this is the last row standing, for staff it is the only one.
+    await tx.delete(users).where(eq(users._id, userId));
+    return removed;
+  });
+
+  log.info('Account deleted', { userId, role: user.role, garagesDeleted });
+  return { role: user.role, garagesDeleted };
 };
 
 interface ForgotPasswordInput {

@@ -39,7 +39,7 @@ export const getCustomersList = async ({ garageId, search, page = 1, limit = 20 
     columns: { _id: true, name: true, phone: true, email: true, totalVisits: true, totalSpent: true, createdAt: true },
     with: { vehicles: { columns: { _id: true, licensePlate: true, make: true, model: true } } },
     where,
-    orderBy: [desc(customers.createdAt)],
+    orderBy: [desc(customers.createdAt), desc(customers._id)],
     offset: paging.offset,
     limit: paging.limit
   });

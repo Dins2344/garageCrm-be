@@ -334,6 +334,60 @@ const options: swaggerJsdoc.Options = {
           }
         },
 
+        // ─── Expense ───
+        Expense: {
+          type: 'object',
+          properties: {
+            _id: { type: 'string' },
+            title: { type: 'string', example: 'Engine oil stock' },
+            category: { type: 'string', enum: ['parts', 'salaries', 'rent', 'utilities', 'tools', 'marketing', 'transport', 'other'] },
+            amount: { type: 'number', example: 12500 },
+            expenseDate: { type: 'string', format: 'date-time' },
+            paymentMethod: { type: 'string', enum: ['cash', 'upi', 'card', 'bank_transfer', 'other', ''] },
+            notes: { type: 'string' },
+            garage: { type: 'string' },
+            createdBy: { type: 'object', nullable: true, properties: { _id: { type: 'string' }, name: { type: 'string' } } },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' }
+          }
+        },
+        CreateExpenseRequest: {
+          type: 'object',
+          required: ['title', 'amount', 'expenseDate'],
+          properties: {
+            title: { type: 'string', example: 'Engine oil stock' },
+            category: { type: 'string', enum: ['parts', 'salaries', 'rent', 'utilities', 'tools', 'marketing', 'transport', 'other'], default: 'other' },
+            amount: { type: 'number', example: 12500, description: 'Greater than zero' },
+            expenseDate: { type: 'string', format: 'date', example: '2026-09-18' },
+            paymentMethod: { type: 'string', enum: ['cash', 'upi', 'card', 'bank_transfer', 'other', ''] },
+            notes: { type: 'string' }
+          }
+        },
+        MonthlyMetrics: {
+          type: 'object',
+          properties: {
+            month: { type: 'string', example: '2026-09' },
+            revenue: { type: 'number', description: 'Paid invoices, by paid date' },
+            services: { type: 'integer', description: 'Invoices raised in the month' },
+            expenses: { type: 'number', description: 'Sum of expenses by expense date' },
+            netProfit: { type: 'number', description: 'revenue - expenses' },
+            previous: {
+              type: 'object',
+              properties: {
+                month: { type: 'string' }, revenue: { type: 'number' }, services: { type: 'integer' },
+                expenses: { type: 'number' }, netProfit: { type: 'number' }
+              }
+            },
+            expensesByCategory: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: { category: { type: 'string' }, total: { type: 'number' }, count: { type: 'integer' } }
+              }
+            }
+          }
+        },
+
         // ─── Vehicle ───
         Vehicle: {
           type: 'object',

@@ -14,6 +14,8 @@ const errorHandler = (err: AppError, req: Request, res: Response, _next: NextFun
   log.error('Request error caught', {
     method: req.method,
     url: req.originalUrl,
+    garageId: req.garageId,
+    userId: req.user?._id,
     errorName: err.name,
     errorMessage: err.message,
     statusCode: err.statusCode || 500,

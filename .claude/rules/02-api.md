@@ -9,19 +9,18 @@ import express from 'express';
 const router = express.Router();
 import { getItems, getItem, createItem, updateItem, deleteItem } from '../controllers/itemController';
 import { protect, authorize } from '../middleware/auth';
-import asyncHandler from '../middleware/asyncHandler';
 
 // Apply auth middleware to all routes in this router
 router.use(protect);
 
 router.route('/')
-  .get(asyncHandler(getItems))
-  .post(authorize('owner', 'admin'), asyncHandler(createItem));
+  .get(getItems)
+  .post(authorize('owner', 'admin'), createItem);
 
 router.route('/:id')
-  .get(asyncHandler(getItem))
-  .put(authorize('owner', 'admin'), asyncHandler(updateItem))
-  .delete(authorize('owner', 'admin'), asyncHandler(deleteItem));
+  .get(getItem)
+  .put(authorize('owner', 'admin'), updateItem)
+  .delete(authorize('owner', 'admin'), deleteItem);
 
 export default router;
 ```
@@ -29,7 +28,7 @@ export default router;
 Note: `req.params.<name>` types as `string | string[]` under Express 5's types (it supports repeating route params). Since none of our routes use that feature, cast explicitly at the top of the handler: `const id = req.params.id as string;` — don't destructure `const { id } = req.params` directly, it won't satisfy a `string`-typed usecase argument.
 
 ### Rules:
-- Always wrap async handlers with `asyncHandler()` — Express 5 needs this for proper error propagation
+- No wrapper and no try/catch around handlers: Express 5 forwards a rejected promise to `errorHandler` on its own
 - Apply `protect` at the router level with `router.use(protect)` (unless the route is public)
 - Apply `authorize(...)` per route for role-based access
 - Use `router.route()` chaining for clean verb grouping
@@ -125,27 +124,24 @@ return res.status(404).json({ ... });
 
 `HttpError` (in `utils/httpError.ts`) is a small `Error` subclass carrying `.statusCode`, typed so `middleware/errorHandler.ts` can read it without casting. It replaces the old ad-hoc `const error = new Error(...); error.statusCode = X;` pattern.
 
-### In Controllers — Always use try/catch + next(error)
+### In Controllers — let it throw
 
 ```typescript
-export const getItem = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const id = req.params.id as string;
-    const item = await itemUsecase.getById(id);
-    res.status(200).json({ success: true, data: item });
-  } catch (error) {
-    log.error('Failed to fetch item', { id: req.params.id, error: (error as Error).message });
-    next(error);  // Let errorHandler middleware handle it
-  }
+export const getItem = async (req: Request, res: Response): Promise<void> => {
+  const id = req.params.id as string;
+  const item = await itemUsecase.getById(id);
+  res.status(200).json({ success: true, data: item });
 };
 ```
 
-`req.user` is set by `protect` but TypeScript can't see across middleware boundaries — use `req.user!` in the success path (protect guarantees it by the time a route handler runs) and `req.user?.` in `catch` blocks, matching the pattern used throughout `controllers/`.
+No try/catch, no `next`: Express 5 routes a rejected promise to `errorHandler`, which logs method, URL, `garageId`, `userId` and the message once. A catch block that only logs and re-throws is a second copy of that line.
+
+`req.user` is set by `protect` but TypeScript can't see across middleware boundaries — use `req.user!` (protect guarantees it by the time a route handler runs).
 
 ### Error Handler Middleware handles:
-- `CastError` → 404 "Resource not found"
-- `11000` (duplicate key) → 400 "Duplicate value entered for '{field}'"
-- `ValidationError` → 400 with joined validation messages
+- Unique violation (`23505`) → 400 "Duplicate value entered for '{field}'"
+- Foreign-key violation (`23503` / `23001`) → 409
+- Any other `pg` error → 500 "Server Error" (never the SQL)
 - Everything else → `err.statusCode || 500`
 
 ---

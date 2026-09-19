@@ -9,19 +9,18 @@ import {
   downloadInvoicePDF
 } from '../controllers/invoiceController';
 import { protect, authorize } from '../middleware/auth';
-import asyncHandler from '../middleware/asyncHandler';
 
 router.use(protect);
 
 router.route('/')
-  .get(asyncHandler(getInvoices))
-  .post(authorize('owner', 'admin', 'service_advisor'), asyncHandler(createInvoice));
+  .get(getInvoices)
+  .post(authorize('owner', 'admin', 'service_advisor'), createInvoice);
 
 router.route('/:id')
-  .get(asyncHandler(getInvoice))
-  .delete(authorize('owner', 'admin'), asyncHandler(deleteInvoice));
+  .get(getInvoice)
+  .delete(authorize('owner', 'admin'), deleteInvoice);
 
-router.get('/:id/pdf', asyncHandler(downloadInvoicePDF));
-router.put('/:id/payment', authorize('owner', 'admin', 'service_advisor'), asyncHandler(updatePaymentStatus));
+router.get('/:id/pdf', downloadInvoicePDF);
+router.put('/:id/payment', authorize('owner', 'admin', 'service_advisor'), updatePaymentStatus);
 
 export default router;

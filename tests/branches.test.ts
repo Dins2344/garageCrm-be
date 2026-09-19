@@ -6,7 +6,7 @@ import { db, schema, findById, countRows, countInGarage } from './helpers/dbAcce
 import { createGarageWithOwner, addGarageToOwner, nextPhone, authHeader, authHeaderFor } from './helpers/factories';
 
 // Note: the free plan caps an owner at 2 garages total (their original +
-// one branch) — see config/planLimits.ts maxGaragesPerOwner. Tests below
+// one branch) — see config/plans.ts maxGaragesPerOwner. Tests below
 // are deliberately scoped to stay within that cap; going through the real
 // create-branch API 3+ times for one owner would hit the plan limit (403)
 // before ever reaching the logic under test.

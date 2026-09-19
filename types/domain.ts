@@ -34,6 +34,10 @@ export type FuelType = (typeof FUEL_TYPES)[number];
 export const PAYMENT_STATUSES = ['unpaid', 'partial', 'paid'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
+/** What an expense was for. Mirrored in both clients' `types/models.ts`. */
+export const EXPENSE_CATEGORIES = ['parts', 'salaries', 'rent', 'utilities', 'tools', 'marketing', 'transport', 'other'] as const;
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
 export const PAYMENT_METHODS = ['cash', 'upi', 'card', 'bank_transfer', 'other', ''] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 

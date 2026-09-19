@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { and, count, desc, eq, gte, ilike, inArray, lt, notInArray } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, lt, notInArray, or } from 'drizzle-orm';
 import { db, DbOrTx } from '../config/db';
 import {
   jobCards, JobCardRow, IEstimationPart, IEstimationLabor, IEstimation,
@@ -16,7 +16,8 @@ import * as reminderUsecase from './reminderUsecase';
 import { sendEstimationEmail } from '../services/emailService';
 import * as pdfService from '../services/pdfService';
 import { runSchema } from '../utils/validation';
-import { containsPattern, listParam, pagination } from '../utils/query';
+import { listParam, pagination, textMatches } from '../utils/query';
+import { vehicleSearchCondition } from './vehicleUsecase';
 import { nextJobCardNumber } from '../utils/numbering';
 import { todayRange } from '../utils/dates';
 import { ApiObject } from '../utils/serialize';
@@ -24,7 +25,7 @@ import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { resolveGarageLocale } from '../utils/locale';
 import { JOB_STATUSES, JobStatus, Role, TERMINAL_JOB_STATUSES } from '../types/domain';
-import { FREE_PLAN_LIMITS } from '../config/planLimits';
+import { FREE_PLAN_LIMITS } from '../config/plans';
 
 const log = logger.child('JobCardUsecase');
 
@@ -98,12 +99,28 @@ export const getActivityList = async ({ garageId, role, userId, status, mechanic
 
   const mechanicFilter = role === 'mechanic' ? userId : mechanicId;
   const statuses = statusFilter(status);
+  const term = search?.trim();
   const where = and(
     eq(jobCards.garageId, garageId),
     mechanicFilter ? eq(jobCards.assignedMechanicId, mechanicFilter) : undefined,
     vehicleId ? eq(jobCards.vehicleId, vehicleId) : undefined,
     statuses.length ? inArray(jobCards.status, statuses) : undefined,
-    search ? ilike(jobCards.jobCardNumber, containsPattern(search)) : undefined
+    // Job card number, or anything the vehicle list would find (plate, make,
+    // model, owner name) — a counter search is "the white Swift" as often as
+    // it is a number.
+    term ? or(
+      textMatches(jobCards.jobCardNumber, term),
+      inArray(
+        jobCards.vehicleId,
+        db.select({ id: vehicles._id }).from(vehicles)
+          .where(and(eq(vehicles.garageId, garageId), vehicleSearchCondition(garageId, term)))
+      ),
+      inArray(
+        jobCards.customerId,
+        db.select({ id: customers._id }).from(customers)
+          .where(and(eq(customers.garageId, garageId), textMatches(customers.name, term)))
+      )
+    ) : undefined
   );
 
   const [{ total }] = await db.select({ total: count() }).from(jobCards).where(where);
@@ -111,7 +128,7 @@ export const getActivityList = async ({ garageId, role, userId, status, mechanic
     columns: { statusHistory: false },
     with: LIST_WITH,
     where,
-    orderBy: [desc(jobCards.createdAt)],
+    orderBy: [desc(jobCards.createdAt), desc(jobCards._id)],
     offset: paging.offset,
     limit: paging.limit
   });

@@ -1171,6 +1171,40 @@
 
 /**
  * @swagger
+ * /auth/account:
+ *   delete:
+ *     tags: [Auth]
+ *     summary: Delete your own account
+ *     description: >
+ *       Self-service deletion, confirmed by re-entering the password. An owner's
+ *       deletion removes every garage they own and everything in those garages
+ *       (staff, customers, vehicles, job cards, invoices, reminders). A staff
+ *       member's deletion removes only their user; job cards they worked keep
+ *       their history with the mechanic / advisor reference cleared. The session
+ *       cookie is cleared; any bearer token stops working because the user no
+ *       longer exists. Rate limited to five attempts per 15 minutes per IP.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [password]
+ *             properties:
+ *               password:
+ *                 type: string
+ *                 description: The caller's current password
+ *     responses:
+ *       200:
+ *         description: Account deleted
+ *       401:
+ *         description: Password incorrect
+ *       429:
+ *         description: Too many attempts
+ */
+
+/**
+ * @swagger
  * /auth/verification:
  *   get:
  *     tags: [Auth]
@@ -1526,6 +1560,136 @@
  *                     jobStatusBreakdown:
  *                       type: object
  *                       additionalProperties: { type: number }
+ */
+
+/**
+ * @swagger
+ * /dashboard/monthly:
+ *   get:
+ *     tags: [Dashboard]
+ *     summary: Monthly business metrics (owner, admin)
+ *     description: >
+ *       Revenue (paid invoices by paid date), services (invoices raised),
+ *       expenses (by expense date) and net profit for one month, with the
+ *       same figures for the previous month and the month's expenses broken
+ *       out by category. Month boundaries are server-local, like the rest
+ *       of the dashboard.
+ *     parameters:
+ *       - in: query
+ *         name: month
+ *         schema:
+ *           type: string
+ *           example: 2026-09
+ *         description: YYYY-MM; defaults to the current month
+ *     responses:
+ *       200:
+ *         description: Monthly metrics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MonthlyMetrics'
+ *       400:
+ *         description: Month is not YYYY-MM
+ */
+
+// ════════════════════════════════════════
+// EXPENSES
+// ════════════════════════════════════════
+
+/**
+ * @swagger
+ * /expenses:
+ *   get:
+ *     tags: [Expenses]
+ *     summary: List expenses (owner, admin)
+ *     description: >
+ *       Newest first. The response also carries `totalAmount`, the sum of
+ *       every expense matching the filters, not just the page.
+ *     parameters:
+ *       - in: query
+ *         name: month
+ *         schema: { type: string, example: '2026-09' }
+ *         description: YYYY-MM to limit to one month
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *           enum: [parts, salaries, rent, utilities, tools, marketing, transport, other]
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Matches the title
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Expense list with `totalAmount`
+ *   post:
+ *     tags: [Expenses]
+ *     summary: Record an expense (owner, admin)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateExpenseRequest'
+ *     responses:
+ *       201:
+ *         description: Expense recorded
+ */
+
+/**
+ * @swagger
+ * /expenses/{id}:
+ *   get:
+ *     tags: [Expenses]
+ *     summary: Get one expense (owner, admin)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Expense
+ *       404:
+ *         description: Not found
+ *   put:
+ *     tags: [Expenses]
+ *     summary: Update an expense (owner, admin)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateExpenseRequest'
+ *     responses:
+ *       200:
+ *         description: Expense updated
+ *   delete:
+ *     tags: [Expenses]
+ *     summary: Delete an expense (owner, admin)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Expense deleted
  */
 
 // ════════════════════════════════════════

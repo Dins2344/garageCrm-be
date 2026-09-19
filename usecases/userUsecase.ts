@@ -6,7 +6,7 @@ import { runSchema } from '../utils/validation';
 import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
-import { FREE_PLAN_LIMITS } from '../config/planLimits';
+import { FREE_PLAN_LIMITS } from '../config/plans';
 
 const log = logger.child('UserUsecase');
 

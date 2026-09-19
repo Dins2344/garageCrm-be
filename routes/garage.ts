@@ -2,20 +2,19 @@ import express from 'express';
 const router = express.Router();
 import { getGarage, updateGarage, listBranches, createBranch, getBranchStaff, deleteBranch } from '../controllers/garageController';
 import { protect, authorize } from '../middleware/auth';
-import asyncHandler from '../middleware/asyncHandler';
 
 router.use(protect);
 
 router.route('/')
-  .get(asyncHandler(getGarage))
-  .put(authorize('owner', 'admin'), asyncHandler(updateGarage));
+  .get(getGarage)
+  .put(authorize('owner', 'admin'), updateGarage);
 
 router.route('/branches')
-  .get(authorize('owner'), asyncHandler(listBranches))
-  .post(authorize('owner'), asyncHandler(createBranch));
+  .get(authorize('owner'), listBranches)
+  .post(authorize('owner'), createBranch);
 
-router.get('/branches/:id/staff', authorize('owner'), asyncHandler(getBranchStaff));
-router.delete('/branches/:id', authorize('owner'), asyncHandler(deleteBranch));
+router.get('/branches/:id/staff', authorize('owner'), getBranchStaff);
+router.delete('/branches/:id', authorize('owner'), deleteBranch);
 
 // Mounted under the existing /api/garage on purpose: scripts/checkSwagger.ts
 // matches mounts with [a-zA-Z]+, so a new hyphenated mount would be silently

@@ -14,7 +14,7 @@ import { todayRange } from '../utils/dates';
 import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
-import { FREE_PLAN_LIMITS } from '../config/planLimits';
+import { FREE_PLAN_LIMITS } from '../config/plans';
 
 const log = logger.child('InvoiceUsecase');
 
@@ -52,7 +52,7 @@ export const getInvoicesList = async ({ garageId, search, paymentStatus, page = 
       jobCard: { columns: { _id: true, jobCardNumber: true } }
     },
     where,
-    orderBy: [desc(invoices.createdAt)],
+    orderBy: [desc(invoices.createdAt), desc(invoices._id)],
     offset: paging.offset,
     limit: paging.limit
   });

@@ -1,6 +1,8 @@
 /**
  * Small query helpers shared by the list endpoints.
  */
+import { ilike, sql, type SQL } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 
 /**
  * A `%term%` pattern for `ilike`, with the wildcard characters in the user's
@@ -31,4 +33,20 @@ export const listParam = (raw: unknown): string[] => {
     .map(v => v.trim())
     .filter(Boolean);
   return [...new Set(parts)];
+};
+
+/** Case-insensitive "contains" on one column. */
+export const textMatches = (column: AnyPgColumn, term: string): SQL =>
+  ilike(column, containsPattern(term));
+
+/**
+ * A plate match that ignores spacing on both sides: plates are stored the
+ * way the counter typed them ("KL 07 BQ 4521") and searched the way people
+ * say them ("kl07bq"). Falls back to a plain contains when the term has no
+ * letters or digits to compare.
+ */
+export const plateMatches = (column: AnyPgColumn, term: string): SQL => {
+  const compact = term.replace(/\s+/g, '');
+  if (!compact) return textMatches(column, term);
+  return sql`replace(${column}, ' ', '') ILIKE ${containsPattern(compact)}`;
 };

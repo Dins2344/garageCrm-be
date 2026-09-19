@@ -40,8 +40,7 @@ log.info('Creating new customer', { garageId, phone: req.body.phone });
 // Log at the END of a successful operation
 log.info('Customer created', { customerId: customer._id, garageId });
 
-// Log in the CATCH block
-log.error('Failed to create customer', { garageId: req.user?.garage?._id, error: error.message });
+// Failures are logged once, by errorHandler — controllers have no catch block
 ```
 
 ---
@@ -79,11 +78,9 @@ const customer = await db.query.customers.findFirst({ where: eq(customers._id, c
 - [ ] User input is never trusted — every create/update runs its zod schema through `runSchema()`
 - [ ] Every query is parameterised through Drizzle; a raw `sql` fragment never interpolates user input
 - [ ] `helmet()` sets security headers
-- [ ] `hpp()` prevents HTTP parameter pollution
 - [ ] Rate limiting is applied on all `/api` routes
 - [ ] JWT secret is in environment variables, never hardcoded
 - [ ] Error responses never expose stack traces in production
-- [ ] Uploaded files are sanitized and stored in `/uploads` with appropriate access
 
 ---
 

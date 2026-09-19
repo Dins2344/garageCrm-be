@@ -1,6 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
 const router = express.Router();
-import asyncHandler from '../middleware/asyncHandler';
 import * as adminController from '../controllers/adminController';
 import * as adminUsecase from '../usecases/adminUsecase';
 import logger from '../utils/logger';
@@ -45,7 +44,7 @@ router.get('/health',  adminController.getHealth);
 // The first write endpoints on this surface — everything above is read or
 // delete. The `router.use(adminAuth)` above already covers every verb;
 // tests/appRelease.test.ts proves it for PUT specifically.
-router.get('/app-release', asyncHandler(adminController.getAppRelease));
-router.put('/app-release', asyncHandler(adminController.updateAppRelease));
+router.get('/app-release', adminController.getAppRelease);
+router.put('/app-release', adminController.updateAppRelease);
 
 export default router;
