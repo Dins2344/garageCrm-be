@@ -52,7 +52,7 @@ export const getInvoicesList = async ({ garageId, search, paymentStatus, page = 
       jobCard: { columns: { _id: true, jobCardNumber: true } }
     },
     where,
-    orderBy: [desc(invoices.createdAt)],
+    orderBy: [desc(invoices.createdAt), desc(invoices._id)],
     offset: paging.offset,
     limit: paging.limit
   });

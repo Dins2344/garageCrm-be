@@ -128,7 +128,7 @@ export const getActivityList = async ({ garageId, role, userId, status, mechanic
     columns: { statusHistory: false },
     with: LIST_WITH,
     where,
-    orderBy: [desc(jobCards.createdAt)],
+    orderBy: [desc(jobCards.createdAt), desc(jobCards._id)],
     offset: paging.offset,
     limit: paging.limit
   });

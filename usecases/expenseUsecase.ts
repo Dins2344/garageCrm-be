@@ -53,7 +53,7 @@ export const getExpensesList = async ({ garageId, month, category, search, page 
     db.query.expenses.findMany({
       with: WITH_CREATOR,
       where,
-      orderBy: [desc(expenses.expenseDate), desc(expenses.createdAt)],
+      orderBy: [desc(expenses.expenseDate), desc(expenses.createdAt), desc(expenses._id)],
       offset: paging.offset,
       limit: paging.limit
     })

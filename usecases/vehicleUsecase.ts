@@ -45,7 +45,7 @@ export const getVehiclesList = async ({ garageId, search, page = 1, limit = 20 }
   const rows = await db.query.vehicles.findMany({
     with: { customer: { columns: { _id: true, name: true, phone: true } } },
     where,
-    orderBy: [desc(vehicles.createdAt)],
+    orderBy: [desc(vehicles.createdAt), desc(vehicles._id)],
     offset: paging.offset,
     limit: paging.limit
   });
@@ -193,7 +193,7 @@ export const getVehicleHistory = async ({ vehicleId, garageId, page = 1, limit =
       assignedMechanic: { columns: { _id: true, name: true } }
     },
     where,
-    orderBy: [desc(jobCards.createdAt)],
+    orderBy: [desc(jobCards.createdAt), desc(jobCards._id)],
     offset: paging.offset,
     limit: paging.limit
   });
