@@ -3,9 +3,7 @@ import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import hpp from 'hpp';
 import cookieParser from 'cookie-parser';
 import os from 'os';
 import swaggerUi from 'swagger-ui-express';
@@ -50,12 +48,11 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
 
-// 3. Security & Performance middleware — Now they have req.body to work with
-// (No body sanitiser any more: every query is parameterised SQL, so there is
-// no operator-injection class for a `$`-key stripper to defend against.)
-app.use(helmet());           // Standard security headers
-app.use(hpp());               // PREVENT HTTP PARAMETER POLLUTION
-app.use(compression());       // GZIP COMPRESSION for smaller payloads
+// 3. Security headers. No body sanitiser (every query is parameterised SQL),
+// no hpp (repeated query keys are a feature — see utils/query.ts listParam —
+// and Express 5's read-only req.query made it a no-op anyway), no compression
+// (nginx gzips in front of the container).
+app.use(helmet());
 
 // 4. Rate Limiting (Protects server from 1M+ user spam)
 const limiter = rateLimit({

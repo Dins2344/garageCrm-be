@@ -9,19 +9,18 @@ import {
   deleteUser
 } from '../controllers/userController';
 import { protect, authorize } from '../middleware/auth';
-import asyncHandler from '../middleware/asyncHandler';
 
 router.use(protect);
 
 router.route('/')
-  .get(authorize('owner', 'admin', 'service_advisor', 'receptionist'), asyncHandler(getUsers))
-  .post(authorize('owner', 'admin'), asyncHandler(createUser));
+  .get(authorize('owner', 'admin', 'service_advisor', 'receptionist'), getUsers)
+  .post(authorize('owner', 'admin'), createUser);
 
 router.route('/:id')
-  .get(authorize('owner', 'admin'), asyncHandler(getUser))
-  .put(authorize('owner', 'admin'), asyncHandler(updateUser))
-  .delete(authorize('owner'), asyncHandler(deleteUser));
+  .get(authorize('owner', 'admin'), getUser)
+  .put(authorize('owner', 'admin'), updateUser)
+  .delete(authorize('owner'), deleteUser);
 
-router.patch('/:id/:action', authorize('owner', 'admin'), asyncHandler(toggleUserStatus));
+router.patch('/:id/:action', authorize('owner', 'admin'), toggleUserStatus);
 
 export default router;

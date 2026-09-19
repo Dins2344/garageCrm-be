@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response } from 'express';
 import * as authUsecase from '../usecases/authUsecase';
 import * as garageUsecase from '../usecases/garageUsecase';
 import { serializeRow } from '../utils/serialize';
@@ -48,157 +48,117 @@ const sendTokenResponse = async (
 
 // @desc    Register owner & create garage
 // @route   POST /api/auth/register
-export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    log.info('New garage registration attempt', { email: req.body.email, garageName: req.body.garageName });
-    const result = await authUsecase.registerNewGarage(req.body);
-    log.info('New garage registered successfully', { userId: result.user._id, garageId: result.user.garage });
-    await sendTokenResponse(result, 201, res);
-  } catch (error) {
-    log.error('Garage registration failed', { email: req.body.email, error: (error as Error).message });
-    next(error);
-  }
+export const register = async (req: Request, res: Response): Promise<void> => {
+  log.info('New garage registration attempt', { email: req.body.email, garageName: req.body.garageName });
+  const result = await authUsecase.registerNewGarage(req.body);
+  log.info('New garage registered successfully', { userId: result.user._id, garageId: result.user.garage });
+  await sendTokenResponse(result, 201, res);
 };
 
 // @desc    Login user
 // @route   POST /api/auth/login
-export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    log.info('Login attempt', { email: req.body.email, ip: req.ip });
-    const result = await authUsecase.authenticateUser({
-      email: req.body.email,
-      password: req.body.password
-    });
-    log.info('Login successful', { userId: result.user._id, role: result.user.role });
-    await sendTokenResponse(result, 200, res);
-  } catch (error) {
-    log.warn('Login failed', { email: req.body.email, error: (error as Error).message });
-    next(error);
-  }
+export const login = async (req: Request, res: Response): Promise<void> => {
+  log.info('Login attempt', { email: req.body.email, ip: req.ip });
+  const result = await authUsecase.authenticateUser({
+    email: req.body.email,
+    password: req.body.password
+  });
+  log.info('Login successful', { userId: result.user._id, role: result.user.role });
+  await sendTokenResponse(result, 200, res);
 };
 
 // @desc    Get current logged in user
 // @route   GET /api/auth/me
-export const getMe = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    log.info('Me request', { userId: req.user?._id, role: req.user?.role });
-    // req.user.garage is joined by the auth middleware for internal use,
-    // but the client-side User type (web and mobile) expects garage as a
-    // plain id string, matching /auth/login and /auth/register — flatten it
-    // back down here rather than leaking the joined row to clients.
-    // The joined garage already carries country/settings, so the locale
-    // resolves here without an extra query — resolve BEFORE flattening.
-    const locale = resolveGarageLocale(req.user!.garage);
-    const data = { ...serializeRow(req.user!), garage: req.user!.garage._id, locale };
-    res.status(200).json({ success: true, data });
-  } catch (error) {
-    log.error('Failed to get current user', { error: (error as Error).message });
-    next(error);
-  }
+export const getMe = async (req: Request, res: Response): Promise<void> => {
+  log.info('Me request', { userId: req.user?._id, role: req.user?.role });
+  // req.user.garage is joined by the auth middleware for internal use,
+  // but the client-side User type (web and mobile) expects garage as a
+  // plain id string, matching /auth/login and /auth/register — flatten it
+  // back down here rather than leaking the joined row to clients.
+  // The joined garage already carries country/settings, so the locale
+  // resolves here without an extra query — resolve BEFORE flattening.
+  const locale = resolveGarageLocale(req.user!.garage);
+  const data = { ...serializeRow(req.user!), garage: req.user!.garage._id, locale };
+  res.status(200).json({ success: true, data });
 };
 
 // @desc    Update profile
 // @route   PUT /api/auth/profile
-export const updateProfile = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    log.info('Profile update request', { userId: req.user?._id });
-    const fieldsToUpdate: { name?: string; phone?: string } = {
-      name: req.body.name,
-      phone: req.body.phone
-    };
+export const updateProfile = async (req: Request, res: Response): Promise<void> => {
+  log.info('Profile update request', { userId: req.user?._id });
+  const fieldsToUpdate: { name?: string; phone?: string } = {
+    name: req.body.name,
+    phone: req.body.phone
+  };
 
-    // Remove undefined fields
-    (Object.keys(fieldsToUpdate) as (keyof typeof fieldsToUpdate)[]).forEach(key =>
-      fieldsToUpdate[key] === undefined && delete fieldsToUpdate[key]
-    );
+  // Remove undefined fields
+  (Object.keys(fieldsToUpdate) as (keyof typeof fieldsToUpdate)[]).forEach(key =>
+    fieldsToUpdate[key] === undefined && delete fieldsToUpdate[key]
+  );
 
-    const user = await authUsecase.updateUserProfile({
-      userId: String(req.user!._id),
-      updateData: fieldsToUpdate
-    });
+  const user = await authUsecase.updateUserProfile({
+    userId: String(req.user!._id),
+    updateData: fieldsToUpdate
+  });
 
-    log.info('Profile updated', { userId: req.user?._id, fields: Object.keys(fieldsToUpdate) });
-    res.status(200).json({ success: true, data: user });
-  } catch (error) {
-    log.error('Profile update failed', { userId: req.user?._id, error: (error as Error).message });
-    next(error);
-  }
+  log.info('Profile updated', { userId: req.user?._id, fields: Object.keys(fieldsToUpdate) });
+  res.status(200).json({ success: true, data: user });
 };
 
 // @desc    Update password
 // @route   PUT /api/auth/updatepassword
-export const updatePassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    log.info('Password change request', { userId: req.user?._id });
-    await authUsecase.changeUserPassword({
-      userId: String(req.user!._id),
-      currentPassword: req.body.currentPassword,
-      newPassword: req.body.newPassword
-    });
-    log.info('Password changed successfully', { userId: req.user?._id });
-    res.status(200).json({ success: true, message: 'Password updated successfully' });
-  } catch (error) {
-    log.warn('Password change failed', { userId: req.user?._id, error: (error as Error).message });
-    next(error);
-  }
+export const updatePassword = async (req: Request, res: Response): Promise<void> => {
+  log.info('Password change request', { userId: req.user?._id });
+  await authUsecase.changeUserPassword({
+    userId: String(req.user!._id),
+    currentPassword: req.body.currentPassword,
+    newPassword: req.body.newPassword
+  });
+  log.info('Password changed successfully', { userId: req.user?._id });
+  res.status(200).json({ success: true, message: 'Password updated successfully' });
 };
 
 // @desc    Delete your own account (owners: every garage they own goes too)
 // @route   DELETE /api/auth/account
-export const deleteAccount = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    log.info('Account deletion requested', { userId: req.user?._id, role: req.user?.role });
-    const { garagesDeleted } = await authUsecase.deleteOwnAccount({
-      userId: String(req.user!._id),
-      password: req.body?.password
-    });
-    log.info('Account deleted', { userId: req.user?._id, garagesDeleted });
-    // The session is dead either way; drop the cookie so the browser agrees.
-    res
-      .cookie('token', 'none', { expires: new Date(Date.now() + 10 * 1000), httpOnly: true })
-      .status(200)
-      .json({ success: true, message: 'Your account has been deleted' });
-  } catch (error) {
-    log.warn('Account deletion failed', { userId: req.user?._id, error: (error as Error).message });
-    next(error);
-  }
+export const deleteAccount = async (req: Request, res: Response): Promise<void> => {
+  log.info('Account deletion requested', { userId: req.user?._id, role: req.user?.role });
+  const { garagesDeleted } = await authUsecase.deleteOwnAccount({
+    userId: String(req.user!._id),
+    password: req.body?.password
+  });
+  log.info('Account deleted', { userId: req.user?._id, garagesDeleted });
+  // The session is dead either way; drop the cookie so the browser agrees.
+  res
+    .cookie('token', 'none', { expires: new Date(Date.now() + 10 * 1000), httpOnly: true })
+    .status(200)
+    .json({ success: true, message: 'Your account has been deleted' });
 };
 
 // @desc    Request a password reset email (owners only)
 // @route   POST /api/auth/forgotpassword
-export const forgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    log.info('Password reset requested', { email: req.body.email });
-    const { status } = await authUsecase.forgotPassword({
-      email: req.body.email,
-      frontendUrl: process.env.CLIENT_URL as string
-    });
+export const forgotPassword = async (req: Request, res: Response): Promise<void> => {
+  log.info('Password reset requested', { email: req.body.email });
+  const { status } = await authUsecase.forgotPassword({
+    email: req.body.email,
+    frontendUrl: process.env.CLIENT_URL as string
+  });
 
-    const message = status === 'staff-managed'
-      ? 'This account is managed by your garage. Ask your owner or an admin to reset your password from Settings → Staff.'
-      : 'If an account exists for that email, a password reset link has been sent.';
+  const message = status === 'staff-managed'
+    ? 'This account is managed by your garage. Ask your owner or an admin to reset your password from Settings → Staff.'
+    : 'If an account exists for that email, a password reset link has been sent.';
 
-    res.status(200).json({ success: true, message });
-  } catch (error) {
-    log.error('Password reset request failed', { email: req.body.email, error: (error as Error).message });
-    next(error);
-  }
+  res.status(200).json({ success: true, message });
 };
 
 // @desc    Reset password using emailed token
 // @route   PUT /api/auth/resetpassword/:token
-export const resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    await authUsecase.resetPassword({
-      token: req.params.token as string,
-      newPassword: req.body.password
-    });
-    log.info('Password reset via token succeeded');
-    res.status(200).json({ success: true, message: 'Password reset successfully. You can now log in.' });
-  } catch (error) {
-    log.warn('Password reset via token failed', { error: (error as Error).message });
-    next(error);
-  }
+export const resetPassword = async (req: Request, res: Response): Promise<void> => {
+  await authUsecase.resetPassword({
+    token: req.params.token as string,
+    newPassword: req.body.password
+  });
+  log.info('Password reset via token succeeded');
+  res.status(200).json({ success: true, message: 'Password reset successfully. You can now log in.' });
 };
 
 // @desc    Log user out / clear cookie

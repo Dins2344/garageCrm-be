@@ -16,7 +16,7 @@ commit messages, shell scripts, CI output, or documentation.
 | App      | Library                     | Example                                           |
 | -------- | --------------------------- | ------------------------------------------------- |
 | Mobile   | `@expo/vector-icons` Ionicons | `<Ionicons name="person-outline" size={16} color="#3b5ff8" />` |
-| Frontend | `lucide-react` (or `react-icons/hi` where a file already uses it) | `<Check className="w-4 h-4" strokeWidth={3} />` |
+| Frontend | `lucide-react` | `<Check className="w-4 h-4" strokeWidth={3} />` |
 | Backend  | none — plain text           | `Hi ${customerName},`                             |
 
 **Why this is a rule, not a preference:**

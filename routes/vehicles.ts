@@ -9,19 +9,18 @@ import {
   getVehicleHistory
 } from '../controllers/vehicleController';
 import { protect, authorize } from '../middleware/auth';
-import asyncHandler from '../middleware/asyncHandler';
 
 router.use(protect);
 
 router.route('/')
-  .get(asyncHandler(getVehicles))
-  .post(authorize('owner', 'admin', 'service_advisor', 'receptionist'), asyncHandler(createVehicle));
+  .get(getVehicles)
+  .post(authorize('owner', 'admin', 'service_advisor', 'receptionist'), createVehicle);
 
 router.route('/:id')
-  .get(asyncHandler(getVehicle))
-  .put(authorize('owner', 'admin', 'service_advisor'), asyncHandler(updateVehicle))
-  .delete(authorize('owner', 'admin'), asyncHandler(deleteVehicle));
+  .get(getVehicle)
+  .put(authorize('owner', 'admin', 'service_advisor'), updateVehicle)
+  .delete(authorize('owner', 'admin'), deleteVehicle);
 
-router.get('/:id/history', asyncHandler(getVehicleHistory));
+router.get('/:id/history', getVehicleHistory);
 
 export default router;

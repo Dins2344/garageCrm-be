@@ -25,7 +25,7 @@ import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { resolveGarageLocale } from '../utils/locale';
 import { JOB_STATUSES, JobStatus, Role, TERMINAL_JOB_STATUSES } from '../types/domain';
-import { FREE_PLAN_LIMITS } from '../config/planLimits';
+import { FREE_PLAN_LIMITS } from '../config/plans';
 
 const log = logger.child('JobCardUsecase');
 

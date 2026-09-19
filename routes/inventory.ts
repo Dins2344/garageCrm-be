@@ -10,21 +10,20 @@ import {
   deleteInventoryItem
 } from '../controllers/inventoryController';
 import { protect, authorize } from '../middleware/auth';
-import asyncHandler from '../middleware/asyncHandler';
 
 router.use(protect);
 
-router.get('/alerts', asyncHandler(getLowStockAlerts));
+router.get('/alerts', getLowStockAlerts);
 
 router.route('/')
-  .get(asyncHandler(getInventory))
-  .post(authorize('owner', 'admin', 'service_advisor'), asyncHandler(createInventoryItem));
+  .get(getInventory)
+  .post(authorize('owner', 'admin', 'service_advisor'), createInventoryItem);
 
 router.route('/:id')
-  .get(asyncHandler(getInventoryItem))
-  .put(authorize('owner', 'admin', 'service_advisor'), asyncHandler(updateInventoryItem))
-  .delete(authorize('owner', 'admin'), asyncHandler(deleteInventoryItem));
+  .get(getInventoryItem)
+  .put(authorize('owner', 'admin', 'service_advisor'), updateInventoryItem)
+  .delete(authorize('owner', 'admin'), deleteInventoryItem);
 
-router.put('/:id/stock', authorize('owner', 'admin', 'service_advisor'), asyncHandler(adjustStock));
+router.put('/:id/stock', authorize('owner', 'admin', 'service_advisor'), adjustStock);
 
 export default router;

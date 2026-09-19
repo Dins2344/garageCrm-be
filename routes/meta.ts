@@ -1,5 +1,4 @@
 import express from 'express';
-import asyncHandler from '../middleware/asyncHandler';
 import * as metaController from '../controllers/metaController';
 import { getCountryOptions } from '../config/countries';
 import { getPlanCatalog } from '../config/plans';
@@ -38,6 +37,6 @@ router.get('/plans', (req, res) => {
  * scripts/checkSwagger.ts's `[a-zA-Z]+` mount regex and would never be checked
  * for documentation at all.
  */
-router.get('/app-update', asyncHandler(metaController.getAppUpdate));
+router.get('/app-update', metaController.getAppUpdate);
 
 export default router;
