@@ -48,7 +48,7 @@ only the `.example` is tracked.
 | `NODE_ENV` | yes | `development` / `production` / `test` |
 | `DATABASE_URL` | yes | Postgres connection string. Use Neon's pooled endpoint for the app |
 | `JWT_SECRET` | yes | Use a long random value |
-| `JWT_EXPIRE` | yes | e.g. `30d` |
+| `JWT_EXPIRE` | yes | `10m` — idle window; every request re-issues the token (cookie / `X-Token` header), capped at 12h per login |
 | `CLIENT_URL` | yes | Web app origin, used for CORS and password-reset links |
 | `SMTP_HOST` `SMTP_PORT` `SMTP_SECURE` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` | no | Email. Unset means email is logged, not sent |
 | `TWILIO_ACCOUNT_SID` `TWILIO_AUTH_TOKEN` `TWILIO_PHONE_NUMBER` | no | SMS. Unset means SMS is logged, not sent |

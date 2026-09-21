@@ -37,7 +37,10 @@ const options: swaggerJsdoc.Options = {
           type: 'http',
           scheme: 'bearer',
           bearerFormat: 'JWT',
-          description: 'Enter your JWT token obtained from /auth/login'
+          description:
+            'JWT from /auth/login. Sessions slide: a token is valid JWT_EXPIRE (10m) from its last use, and any ' +
+            'protected response to a token older than 60s carries a fresh one in the X-Token header (and the ' +
+            'httpOnly cookie for web). Clients must store the replacement. Sliding stops 12h after login.'
         },
         AdminAuth: {
           type: 'http',
