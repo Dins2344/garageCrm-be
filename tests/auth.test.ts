@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import app from '../app';
 import { eq, inArray } from 'drizzle-orm';
@@ -145,3 +146,55 @@ describe('Auth', () => {
     expect(deleteAttempt.status).toBe(403);
   });
 });
+
+// Sessions slide: any authenticated request made with a token older than a
+// minute gets a fresh one back (cookie for web, X-Token header for mobile),
+// so an active user never expires and an idle one dies with the 10m token.
+describe('Sliding session', () => {
+  const secret = () => process.env.JWT_SECRET as string;
+  const decode = (t: string) => jwt.decode(t) as { iat: number; auth: number };
+
+  const agedToken = async (email: string, ageSeconds: number, authAgeSeconds = ageSeconds) => {
+    const register = await registerGarageOwner({ email });
+    const { id, role } = jwt.decode(register.body.token) as { id: string; role: string };
+    const now = Math.floor(Date.now() / 1000);
+    return jwt.sign({ id, role, iat: now - ageSeconds, auth: now - authAgeSeconds }, secret(), { expiresIn: '10m' });
+  };
+
+  it('re-issues a token older than 60s, keeping the original login time', async () => {
+    const old = await agedToken('slide1@example.com', 120);
+
+    const res = await request(app).get('/api/auth/me').set(authHeader(old));
+
+    expect(res.status).toBe(200);
+    const fresh = res.headers['x-token'];
+    expect(fresh).toBeTruthy();
+    expect(fresh).not.toBe(old);
+    expect(decode(fresh).auth).toBe(decode(old).auth);
+    expect(String(res.headers['set-cookie'])).toContain(`token=${fresh}`);
+  });
+
+  it('does not re-issue a token younger than 60s', async () => {
+    const register = await registerGarageOwner({ email: 'slide2@example.com' });
+
+    const res = await request(app).get('/api/auth/me').set(authHeader(register.body.token));
+
+    expect(res.status).toBe(200);
+    expect(res.headers['x-token']).toBeUndefined();
+  });
+
+  it('stops sliding once the login is older than the absolute cap', async () => {
+    const capped = await agedToken('slide3@example.com', 120, 13 * 60 * 60);
+
+    const res = await request(app).get('/api/auth/me').set(authHeader(capped));
+
+    expect(res.status).toBe(200);
+    expect(res.headers['x-token']).toBeUndefined();
+  });
+
+  it('stamps the login time on tokens issued at login', async () => {
+    const register = await registerGarageOwner({ email: 'slide4@example.com' });
+    expect(decode(register.body.token).auth).toBeGreaterThan(0);
+  });
+});
+

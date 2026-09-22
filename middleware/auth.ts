@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
 import { and, eq } from 'drizzle-orm';
 import { db } from '../config/db';
-import { users, USER_PUBLIC_COLUMNS } from '../models/User';
+import { users, USER_PUBLIC_COLUMNS, signUserToken } from '../models/User';
 import { garages } from '../models/Garage';
 import { isObjectIdHex } from '../utils/ids';
 import logger from '../utils/logger';
@@ -14,7 +14,35 @@ const log = logger.child('AuthMiddleware');
 interface AccessTokenPayload {
   id: string;
   role: Role;
+  iat: number;
+  /** Login time (epoch s). Missing on tokens issued before sliding sessions. */
+  auth?: number;
 }
+
+export const TOKEN_COOKIE_OPTIONS = {
+  // Outlives the JWT on purpose: an expired token still in the jar just 401s,
+  // which is exactly the sign-out the clients want after a long absence.
+  maxAge: 30 * 24 * 60 * 60 * 1000,
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+};
+
+// Sliding session: a request carrying a token older than this gets a fresh
+// one, so the JWT_EXPIRE window is "time since last request", not "time
+// since login". The cap is the absolute end nothing slides past.
+// ponytail: single 12h cap, make it per-role if a shift ever needs longer.
+const RESIGN_AFTER_S = 60;
+const SESSION_MAX_S = 12 * 60 * 60;
+
+const slideToken = (res: Response, user: AuthenticatedUser, decoded: AccessTokenPayload): void => {
+  const now = Math.floor(Date.now() / 1000);
+  const auth = decoded.auth ?? decoded.iat;
+  if (now - decoded.iat < RESIGN_AFTER_S || now - auth > SESSION_MAX_S) return;
+  const fresh = signUserToken({ _id: user._id, role: user.role }, auth);
+  res.cookie('token', fresh, TOKEN_COOKIE_OPTIONS); // web
+  res.setHeader('X-Token', fresh); // mobile
+};
 
 // Resolves which garage a request operates on. Owners can act on any garage
 // they own by passing `X-Garage-Id`; every other role is always confined to
@@ -101,6 +129,7 @@ export const protect = async (req: Request, res: Response, next: NextFunction): 
       return;
     }
     req.garageId = resolvedGarageId;
+    slideToken(res, req.user, decoded);
 
     log.debug('User authenticated successfully', { userId: user._id, role: user.role, garageId: req.garageId });
     next();

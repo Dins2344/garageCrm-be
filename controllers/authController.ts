@@ -4,6 +4,7 @@ import * as garageUsecase from '../usecases/garageUsecase';
 import { serializeRow } from '../utils/serialize';
 import { resolveGarageLocale } from '../utils/locale';
 import logger from '../utils/logger';
+import { TOKEN_COOKIE_OPTIONS } from '../middleware/auth';
 const log = logger.child('AuthController');
 
 // Helper to send formatted token response
@@ -19,16 +20,9 @@ const sendTokenResponse = async (
 ): Promise<void> => {
   const garage = await garageUsecase.findGarageLocaleSource({ garageId: user.garage });
 
-  const options = {
-    expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax' as const,
-  };
-
   res
     .status(statusCode)
-    .cookie('token', token, options)
+    .cookie('token', token, TOKEN_COOKIE_OPTIONS)
     .json({
       success: true,
       token, // Kept for mobile app backward compatibility

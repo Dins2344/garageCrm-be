@@ -62,9 +62,13 @@ export const updateUserSchema = z.object({
   isActive: z.boolean().optional()
 });
 
-/** Formerly `user.getSignedJwtToken()`. */
-export const signUserToken = (user: { _id: string; role: Role | string }): string =>
-  jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET as string, {
+/**
+ * Formerly `user.getSignedJwtToken()`. `auth` is the login time in epoch
+ * seconds; middleware/auth.ts re-issues (slides) the token on activity but
+ * carries `auth` forward unchanged so a session still has an absolute end.
+ */
+export const signUserToken = (user: { _id: string; role: Role | string }, auth = Math.floor(Date.now() / 1000)): string =>
+  jwt.sign({ id: user._id, role: user.role, auth }, process.env.JWT_SECRET as string, {
     expiresIn: process.env.JWT_EXPIRE
   } as jwt.SignOptions);
 
