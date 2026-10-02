@@ -135,7 +135,7 @@ const priceTable = (currency: string, minorUnits: number, plus: number, pro: num
 });
 
 export const PLAN_PRICES: Partial<Record<CountryCode, PlanPrices>> & { default: PlanPrices } = {
-  IN: priceTable('INR', 100, 499_00, 999_00),
+  IN: priceTable('INR', 100, 199_00, 499_00),
   LK: priceTable('LKR', 100, 2900_00, 5900_00),
   AE: priceTable('AED', 100, 49_00, 99_00),
   SA: priceTable('SAR', 100, 49_00, 99_00),

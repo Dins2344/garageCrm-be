@@ -72,7 +72,7 @@ Two different taxes matter in every country and must not be confused:
 | Recurring feasible | yes (RBI e-mandate / UPI AutoPay, extra auth above ₹15k) | cards only | cards | cards; Mada tokenised | cards | cards | **no** on KNET | no |
 | SMS sender-ID registration | DLT (TRAI) — Twilio international route works but is filtered; verification OTPs need a registered DLT template | light | **mandatory** (TDRA); unregistered OTPs often dropped | **mandatory** (CST); unregistered international senders are commonly blocked | mandatory (TRA) | mandatory (CRA) | mandatory (CITRA) | light |
 | E-invoicing mandate on the garage's invoices | GST e-invoice only above ₹5 Cr turnover — not our users | none | **Peppol PINT-AE B2B, phased from July 2026** — invoice PDF alone will stop being compliant for VAT-registered garages | **ZATCA Fatoora** — every VAT-registered business; Phase 1 needs a TLV **QR code on the PDF**, Phase 2 needs API integration. **Our invoice PDF is not usable in Saudi today.** | VAT invoice fields only | none | none | none |
-| Suggested price points (monthly, Plus / Pro) | ₹499 / ₹999 | LKR 2,900 / 5,900 | AED 49 / 99 | SAR 49 / 99 | BHD 5 / 10 | QAR 49 / 99 | KWD 4 / 8 | NPR 1,290 / 2,590 |
+| Suggested price points (monthly, Plus / Pro) | ₹199 / ₹499 | LKR 2,900 / 5,900 | AED 49 / 99 | SAR 49 / 99 | BHD 5 / 10 | QAR 49 / 99 | KWD 4 / 8 | NPR 1,290 / 2,590 |
 
 The price points are placeholders at roughly purchasing-power parity for you
 to set; the mechanism (fixed local price per country, never live FX) is the
