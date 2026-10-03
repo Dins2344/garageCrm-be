@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, max, ne, or } from 'drizzle-orm';
 import { db } from '../config/db';
 import { vehicles, createVehicleSchema, updateVehicleSchema, vehicleToApi } from '../models/Vehicle';
 import { customers } from '../models/Customer';
@@ -8,6 +8,9 @@ import { pagination, plateMatches, textMatches } from '../utils/query';
 import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
+import { DATE_FORMAT, excelDay, toXlsxBuffer } from '../utils/excel';
+import { ExportFile, exportContext } from './customerUsecase';
+import { SERVICE_TYPES } from '../types/domain';
 
 const log = logger.child('VehicleUsecase');
 
@@ -51,6 +54,60 @@ export const getVehiclesList = async ({ garageId, search, page = 1, limit = 20 }
   });
 
   return { vehicles: rows.map(vehicleToApi), total };
+};
+
+/** Every vehicle of the garage, with its owner, as an .xlsx — no search, no paging. */
+export const exportVehicles = async ({ garageId }: { garageId: string }): Promise<ExportFile> => {
+  const { timezone, today } = await exportContext(garageId);
+  const rows = await db.query.vehicles.findMany({
+    with: { customer: { columns: { name: true, phone: true } } },
+    where: eq(vehicles.garageId, garageId),
+    orderBy: [desc(vehicles.createdAt), desc(vehicles._id)]
+  });
+
+  // Latest intake per vehicle and service type, in one grouped query. A
+  // cancelled job card means the work never happened, so it is not a visit.
+  const visits = await db
+    .select({ vehicleId: jobCards.vehicleId, serviceType: jobCards.serviceType, lastVisit: max(jobCards.createdAt) })
+    .from(jobCards)
+    .where(and(eq(jobCards.garageId, garageId), ne(jobCards.status, 'cancelled')))
+    .groupBy(jobCards.vehicleId, jobCards.serviceType);
+  const lastVisit = new Map(visits.map((v) => [`${v.vehicleId}:${v.serviceType}`, v.lastVisit]));
+
+  const buffer = await toXlsxBuffer('Vehicles', [
+    { header: 'Plate', key: 'licensePlate', width: 14 },
+    { header: 'Make', key: 'make' },
+    { header: 'Model', key: 'model' },
+    { header: 'Year', key: 'year', width: 8 },
+    { header: 'Colour', key: 'color', width: 12 },
+    { header: 'Fuel', key: 'fuelType', width: 10 },
+    { header: 'VIN', key: 'vin', width: 20 },
+    { header: 'Engine no.', key: 'engineNumber', width: 18 },
+    { header: 'Odometer', key: 'currentOdometerReading', width: 12, numFmt: '#,##0' },
+    ...SERVICE_TYPES.map((type) => ({ header: `Last ${type}`, key: `last_${type}`, width: 13, numFmt: DATE_FORMAT })),
+    { header: 'Owner', key: 'ownerName', width: 24 },
+    { header: 'Owner phone', key: 'ownerPhone', width: 16 },
+    { header: 'Created', key: 'createdAt', width: 12, numFmt: DATE_FORMAT }
+  ], rows.map((v) => ({
+    licensePlate: v.licensePlate,
+    make: v.make,
+    model: v.model,
+    year: v.year,
+    color: v.color,
+    fuelType: v.fuelType,
+    vin: v.vin,
+    engineNumber: v.engineNumber,
+    currentOdometerReading: v.currentOdometerReading,
+    ...Object.fromEntries(SERVICE_TYPES.map((type) => {
+      const at = lastVisit.get(`${v._id}:${type}`);
+      return [`last_${type}`, at ? excelDay(at, timezone) : undefined];
+    })),
+    ownerName: v.customer.name,
+    ownerPhone: v.customer.phone,
+    createdAt: excelDay(v.createdAt, timezone)
+  })));
+
+  return { buffer, filename: `vehicles-${today}.xlsx` };
 };
 
 interface GetDetailsInput {

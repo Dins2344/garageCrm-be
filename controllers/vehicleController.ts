@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as vehicleUsecase from '../usecases/vehicleUsecase';
 import logger from '../utils/logger';
+import { XLSX_CONTENT_TYPE } from '../utils/excel';
 const log = logger.child('VehicleController');
 
 // @desc    Get all vehicles
@@ -104,4 +105,18 @@ export const getVehicleHistory = async (req: Request, res: Response): Promise<vo
     currentPage: result.page,
     data: result.jobCards
   });
+};
+
+// @desc    Export every vehicle as an Excel file (owner/admin)
+// @route   GET /api/vehicles/export
+export const exportVehicles = async (req: Request, res: Response): Promise<void> => {
+  const garageId = req.garageId!;
+  log.info('Vehicle export requested', { garageId, userId: req.user!._id });
+  const { buffer, filename } = await vehicleUsecase.exportVehicles({ garageId });
+  res.set({
+    'Content-Type': XLSX_CONTENT_TYPE,
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Content-Length': buffer.length
+  });
+  res.send(buffer);
 };

@@ -1,13 +1,16 @@
-import { and, count, desc, eq, ilike, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { db } from '../config/db';
 import { customers, createCustomerSchema, updateCustomerSchema, customerToApi } from '../models/Customer';
 import { vehicles } from '../models/Vehicle';
 import { jobCards } from '../models/JobCard';
+import { garages } from '../models/Garage';
 import { runSchema } from '../utils/validation';
 import { containsPattern, pagination } from '../utils/query';
 import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
+import { resolveGarageLocale } from '../utils/locale';
+import { DATE_FORMAT, MONEY_FORMAT, excelDay, toXlsxBuffer } from '../utils/excel';
 
 const log = logger.child('CustomerUsecase');
 
@@ -46,6 +49,70 @@ export const getCustomersList = async ({ garageId, search, page = 1, limit = 20 
 
   log.info('Customers list fetched', { garageId, count: rows.length, total });
   return { customers: rows.map(customerToApi), total, page: paging.page, limit: paging.limit };
+};
+
+export interface ExportFile {
+  buffer: Buffer;
+  filename: string;
+}
+
+/**
+ * What an export needs from the garage: its currency for money headers, and
+ * its timezone so dates (and the filename) name the garage's own calendar day.
+ * Exported for vehicleUsecase's export.
+ */
+export const exportContext = async (garageId: string) => {
+  const garage = await db.query.garages.findFirst({
+    columns: { country: true, settings: true },
+    where: eq(garages._id, garageId)
+  });
+  const { currency, timezone } = resolveGarageLocale(garage);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
+  return { currency, timezone, today };
+};
+
+/** Every customer of the garage as an .xlsx — no search, no paging. */
+export const exportCustomers = async ({ garageId }: { garageId: string }): Promise<ExportFile> => {
+  const { currency, timezone, today } = await exportContext(garageId);
+  const rows = await db.query.customers.findMany({
+    with: { vehicles: { columns: { licensePlate: true }, orderBy: [asc(vehicles.createdAt)] } },
+    where: eq(customers.garageId, garageId),
+    orderBy: [desc(customers.createdAt), desc(customers._id)]
+  });
+
+  const buffer = await toXlsxBuffer('Customers', [
+    { header: 'Name', key: 'name', width: 24 },
+    { header: 'Phone', key: 'phone', width: 16 },
+    { header: 'Email', key: 'email', width: 26 },
+    { header: 'Street', key: 'street', width: 28 },
+    { header: 'City', key: 'city' },
+    { header: 'State', key: 'state' },
+    { header: 'Postal code', key: 'postalCode', width: 12 },
+    { header: 'Notes', key: 'notes', width: 30 },
+    { header: 'Vehicles', key: 'vehicleCount', width: 10 },
+    { header: 'Vehicle numbers', key: 'vehicleNumbers', width: 28 },
+    { header: 'Total visits', key: 'totalVisits', width: 12 },
+    { header: `Total spent (${currency})`, key: 'totalSpent', numFmt: MONEY_FORMAT },
+    { header: 'Created', key: 'createdAt', width: 12, numFmt: DATE_FORMAT }
+  ], rows.map((c) => ({
+    name: c.name,
+    phone: c.phone,
+    email: c.email,
+    street: c.address.street,
+    city: c.address.city,
+    state: c.address.state,
+    postalCode: c.address.pincode,
+    notes: c.notes,
+    vehicleCount: c.vehicles.length,
+    // Blank, not "", for a customer with no vehicles, so the cell stays empty.
+    vehicleNumbers: c.vehicles.map((v) => v.licensePlate).join(', ') || undefined,
+    totalVisits: c.totalVisits,
+    totalSpent: c.totalSpent,
+    createdAt: excelDay(c.createdAt, timezone)
+  })));
+
+  log.info('Customers exported', { garageId, count: rows.length });
+  return { buffer, filename: `customers-${today}.xlsx` };
 };
 
 interface GetByIdInput {
