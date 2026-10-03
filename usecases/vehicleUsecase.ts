@@ -8,6 +8,8 @@ import { pagination, plateMatches, textMatches } from '../utils/query';
 import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
+import { DATE_FORMAT, excelDay, toXlsxBuffer } from '../utils/excel';
+import { ExportFile, exportContext } from './customerUsecase';
 
 const log = logger.child('VehicleUsecase');
 
@@ -51,6 +53,46 @@ export const getVehiclesList = async ({ garageId, search, page = 1, limit = 20 }
   });
 
   return { vehicles: rows.map(vehicleToApi), total };
+};
+
+/** Every vehicle of the garage, with its owner, as an .xlsx — no search, no paging. */
+export const exportVehicles = async ({ garageId }: { garageId: string }): Promise<ExportFile> => {
+  const { timezone, today } = await exportContext(garageId);
+  const rows = await db.query.vehicles.findMany({
+    with: { customer: { columns: { name: true, phone: true } } },
+    where: eq(vehicles.garageId, garageId),
+    orderBy: [desc(vehicles.createdAt), desc(vehicles._id)]
+  });
+
+  const buffer = await toXlsxBuffer('Vehicles', [
+    { header: 'Plate', key: 'licensePlate', width: 14 },
+    { header: 'Make', key: 'make' },
+    { header: 'Model', key: 'model' },
+    { header: 'Year', key: 'year', width: 8 },
+    { header: 'Colour', key: 'color', width: 12 },
+    { header: 'Fuel', key: 'fuelType', width: 10 },
+    { header: 'VIN', key: 'vin', width: 20 },
+    { header: 'Engine no.', key: 'engineNumber', width: 18 },
+    { header: 'Odometer', key: 'currentOdometerReading', width: 12, numFmt: '#,##0' },
+    { header: 'Owner', key: 'ownerName', width: 24 },
+    { header: 'Owner phone', key: 'ownerPhone', width: 16 },
+    { header: 'Created', key: 'createdAt', width: 12, numFmt: DATE_FORMAT }
+  ], rows.map((v) => ({
+    licensePlate: v.licensePlate,
+    make: v.make,
+    model: v.model,
+    year: v.year,
+    color: v.color,
+    fuelType: v.fuelType,
+    vin: v.vin,
+    engineNumber: v.engineNumber,
+    currentOdometerReading: v.currentOdometerReading,
+    ownerName: v.customer.name,
+    ownerPhone: v.customer.phone,
+    createdAt: excelDay(v.createdAt, timezone)
+  })));
+
+  return { buffer, filename: `vehicles-${today}.xlsx` };
 };
 
 interface GetDetailsInput {

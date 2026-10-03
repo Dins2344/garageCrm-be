@@ -273,6 +273,25 @@
 
 /**
  * @swagger
+ * /customers/export:
+ *   get:
+ *     tags: [Customers]
+ *     summary: Export every customer of the active garage as an Excel file
+ *     description: Roles — owner, admin. Ignores search and paging; one row per record.
+ *     responses:
+ *       200:
+ *         description: .xlsx file
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       403:
+ *         description: Role not allowed to export
+ */
+
+/**
+ * @swagger
  * /customers/{id}:
  *   get:
  *     tags: [Customers]
@@ -353,6 +372,25 @@
  *     responses:
  *       201:
  *         description: Vehicle created
+ */
+
+/**
+ * @swagger
+ * /vehicles/export:
+ *   get:
+ *     tags: [Vehicles]
+ *     summary: Export every vehicle of the active garage as an Excel file
+ *     description: Roles — owner, admin. Ignores search and paging; one row per record.
+ *     responses:
+ *       200:
+ *         description: .xlsx file
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       403:
+ *         description: Role not allowed to export
  */
 
 /**

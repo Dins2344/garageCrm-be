@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as customerUsecase from '../usecases/customerUsecase';
 import logger from '../utils/logger';
+import { XLSX_CONTENT_TYPE } from '../utils/excel';
 const log = logger.child('CustomerController');
 
 // @desc    Get all customers â€” Thin Controller
@@ -69,4 +70,18 @@ export const deleteCustomer = async (req: Request, res: Response): Promise<void>
   await customerUsecase.removeCustomer({ customerId: id, garageId });
   log.info('Customer deleted', { customerId: id, garageId });
   res.status(200).json({ success: true, message: 'Customer deleted successfully' });
+};
+
+// @desc    Export every customer as an Excel file (owner/admin)
+// @route   GET /api/customers/export
+export const exportCustomers = async (req: Request, res: Response): Promise<void> => {
+  const garageId = req.garageId!;
+  log.info('Customer export requested', { garageId, userId: req.user!._id });
+  const { buffer, filename } = await customerUsecase.exportCustomers({ garageId });
+  res.set({
+    'Content-Type': XLSX_CONTENT_TYPE,
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Content-Length': buffer.length
+  });
+  res.send(buffer);
 };

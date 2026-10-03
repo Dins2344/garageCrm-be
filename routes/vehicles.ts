@@ -6,7 +6,8 @@ import {
   createVehicle,
   updateVehicle,
   deleteVehicle,
-  getVehicleHistory
+  getVehicleHistory,
+  exportVehicles
 } from '../controllers/vehicleController';
 import { protect, authorize } from '../middleware/auth';
 
@@ -15,6 +16,9 @@ router.use(protect);
 router.route('/')
   .get(getVehicles)
   .post(authorize('owner', 'admin', 'service_advisor', 'receptionist'), createVehicle);
+
+// Before '/:id', or "export" is read as an id.
+router.get('/export', authorize('owner', 'admin'), exportVehicles);
 
 router.route('/:id')
   .get(getVehicle)
