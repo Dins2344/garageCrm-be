@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { db } from '../config/db';
 import { customers, createCustomerSchema, updateCustomerSchema, customerToApi } from '../models/Customer';
 import { vehicles } from '../models/Vehicle';
@@ -75,7 +75,7 @@ export const exportContext = async (garageId: string) => {
 export const exportCustomers = async ({ garageId }: { garageId: string }): Promise<ExportFile> => {
   const { currency, timezone, today } = await exportContext(garageId);
   const rows = await db.query.customers.findMany({
-    with: { vehicles: { columns: { _id: true } } },
+    with: { vehicles: { columns: { licensePlate: true }, orderBy: [asc(vehicles.createdAt)] } },
     where: eq(customers.garageId, garageId),
     orderBy: [desc(customers.createdAt), desc(customers._id)]
   });
@@ -90,6 +90,7 @@ export const exportCustomers = async ({ garageId }: { garageId: string }): Promi
     { header: 'Postal code', key: 'postalCode', width: 12 },
     { header: 'Notes', key: 'notes', width: 30 },
     { header: 'Vehicles', key: 'vehicleCount', width: 10 },
+    { header: 'Vehicle numbers', key: 'vehicleNumbers', width: 28 },
     { header: 'Total visits', key: 'totalVisits', width: 12 },
     { header: `Total spent (${currency})`, key: 'totalSpent', numFmt: MONEY_FORMAT },
     { header: 'Created', key: 'createdAt', width: 12, numFmt: DATE_FORMAT }
@@ -103,6 +104,8 @@ export const exportCustomers = async ({ garageId }: { garageId: string }): Promi
     postalCode: c.address.pincode,
     notes: c.notes,
     vehicleCount: c.vehicles.length,
+    // Blank, not "", for a customer with no vehicles, so the cell stays empty.
+    vehicleNumbers: c.vehicles.map((v) => v.licensePlate).join(', ') || undefined,
     totalVisits: c.totalVisits,
     totalSpent: c.totalSpent,
     createdAt: excelDay(c.createdAt, timezone)
