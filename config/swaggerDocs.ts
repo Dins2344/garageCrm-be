@@ -494,8 +494,9 @@
  *         description: Job card created
  *       400:
  *         description: >-
- *           Validation failed, or odometerAtIntake is lower than the vehicle's last
- *           visit that was not cancelled (readings of 0 are ignored)
+ *           Validation failed, odometerAtIntake is lower than the vehicle's last
+ *           visit that was not cancelled (readings of 0 are ignored), or an
+ *           assignee is not staff of this garage with a fitting role
  *       409:
  *         description: The vehicle already has an open job card
  */
@@ -552,7 +553,11 @@
  *       200:
  *         description: Job card updated
  *       400:
- *         description: Validation failed, or the odometer changed without odometerRemarks
+ *         description: >-
+ *           Validation failed, the odometer changed without odometerRemarks, or
+ *           assignedMechanic/assignedAdvisor is not staff of this garage with a
+ *           fitting role (mechanic; owner/admin/service_advisor). Assignment
+ *           changes are recorded on the status timeline.
  *       403:
  *         description: A role other than owner/admin tried to change the odometer reading
  *   delete:
@@ -589,7 +594,7 @@
  *             $ref: '#/components/schemas/UpdateEstimationRequest'
  *     responses:
  *       200:
- *         description: Estimation updated with calculated totals
+ *         description: Estimation updated with calculated totals. A save that changes the line items, discount or tax rate adds a status timeline entry.
  */
 
 /**

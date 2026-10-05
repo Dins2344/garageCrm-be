@@ -92,6 +92,7 @@ export const updateEstimation = async (req: Request, res: Response): Promise<voi
   const jobCard = await jobCardUsecase.calculateAndSaveEstimation({
     jobCardId: id,
     garageId,
+    userId: req.user!._id,
     estimationData: req.body
   });
 
