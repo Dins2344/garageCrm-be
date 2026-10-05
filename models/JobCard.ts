@@ -81,6 +81,8 @@ export const updateJobCardSchema = z.object({
   status: statusField.optional(),
   statusNotes: z.string().optional(),
   odometerAtIntake: odometerField.optional(),
+  /** Required (and checked in the usecase) only when odometerAtIntake actually changes. */
+  odometerRemarks: z.string().trim().max(500, 'Remarks cannot exceed 500 characters').optional(),
   expectedDeliveryDate: nullableDate().optional(),
   actualDeliveryDate: nullableDate().optional(),
   internalNotes: z.string().trim().optional()

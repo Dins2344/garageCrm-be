@@ -492,6 +492,12 @@
  *     responses:
  *       201:
  *         description: Job card created
+ *       400:
+ *         description: >-
+ *           Validation failed, or odometerAtIntake is lower than the vehicle's last
+ *           visit that was not cancelled (readings of 0 are ignored)
+ *       409:
+ *         description: The vehicle already has an open job card
  */
 
 /**
@@ -534,9 +540,21 @@
  *                 type: string
  *               statusNotes:
  *                 type: string
+ *               odometerAtIntake:
+ *                 type: number
+ *                 description: >-
+ *                   Correcting a recorded reading. Owner/admin only, no lower bound,
+ *                   and odometerRemarks is required. Sending the unchanged value is a no-op.
+ *               odometerRemarks:
+ *                 type: string
+ *                 description: Why the reading changed. Recorded on the status timeline.
  *     responses:
  *       200:
  *         description: Job card updated
+ *       400:
+ *         description: Validation failed, or the odometer changed without odometerRemarks
+ *       403:
+ *         description: A role other than owner/admin tried to change the odometer reading
  *   delete:
  *     tags: [Job Cards]
  *     summary: Delete job card (owner/admin only)

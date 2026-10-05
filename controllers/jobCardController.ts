@@ -74,6 +74,7 @@ export const updateJobCard = async (req: Request, res: Response): Promise<void> 
     jobCardId: id,
     garageId,
     userId: req.user!._id,
+    role: req.user!.role,
     updateData: req.body
   });
 
