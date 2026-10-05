@@ -74,6 +74,7 @@ export const updateJobCard = async (req: Request, res: Response): Promise<void> 
     jobCardId: id,
     garageId,
     userId: req.user!._id,
+    role: req.user!.role,
     updateData: req.body
   });
 
@@ -91,6 +92,7 @@ export const updateEstimation = async (req: Request, res: Response): Promise<voi
   const jobCard = await jobCardUsecase.calculateAndSaveEstimation({
     jobCardId: id,
     garageId,
+    userId: req.user!._id,
     estimationData: req.body
   });
 

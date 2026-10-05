@@ -97,6 +97,8 @@ export interface StatusHistoryEntry {
   changedBy: string | null;
   changedAt: string;
   notes: string;
+  /** Set when the change was not made by a signed-in user (changedBy is null). */
+  actor?: 'customer';
 }
 
 export interface EstimationPart {

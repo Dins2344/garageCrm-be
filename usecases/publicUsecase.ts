@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../config/db';
-import { jobCards, historyEntry, jobCardToApi } from '../models/JobCard';
+import { jobCards, historyEntry, jobCardToApi, LINK_APPROVAL_NOTE } from '../models/JobCard';
 import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
@@ -53,7 +53,7 @@ export const approveEstimationByToken = async (token: string): Promise<ApiObject
   const [updated] = await db.update(jobCards).set({
     estimation: { ...jobCard.estimation, approvedByCustomer: true, approvedAt: new Date().toISOString() },
     status: jobCard.status === 'estimation_sent' ? 'approved' : jobCard.status,
-    statusHistory: [...jobCard.statusHistory, historyEntry('approved', null, 'Estimation approved by customer via approval link')]
+    statusHistory: [...jobCard.statusHistory, { ...historyEntry('approved', null, LINK_APPROVAL_NOTE), actor: 'customer' as const }]
   }).where(eq(jobCards._id, jobCard._id)).returning();
 
   log.info('Estimation approved by customer via token', { jobCardId: jobCard._id });

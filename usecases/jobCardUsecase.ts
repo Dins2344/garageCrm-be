@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { and, count, desc, eq, gte, inArray, lt, notInArray, or } from 'drizzle-orm';
+import { and, count, desc, eq, gt, gte, inArray, lt, ne, notInArray, or } from 'drizzle-orm';
 import { db, DbOrTx } from '../config/db';
 import {
   jobCards, JobCardRow, IEstimationPart, IEstimationLabor, IEstimation,
@@ -24,10 +24,58 @@ import { ApiObject } from '../utils/serialize';
 import logger from '../utils/logger';
 import { HttpError } from '../utils/httpError';
 import { resolveGarageLocale } from '../utils/locale';
+import { formatMoney } from '../utils/format';
+import { isObjectIdHex } from '../utils/ids';
 import { JOB_STATUSES, JobStatus, Role, TERMINAL_JOB_STATUSES } from '../types/domain';
 import { FREE_PLAN_LIMITS } from '../config/plans';
 
 const log = logger.child('JobCardUsecase');
+
+// Whom the clients' pickers offer: both build them from GET /users (the active
+// garage's staff), filtered to these roles.
+const MECHANIC_ROLES: readonly Role[] = ['mechanic'];
+const ADVISOR_ROLES: readonly Role[] = ['owner', 'admin', 'service_advisor'];
+
+/**
+ * The staff member a job card is being assigned to, or null for "unassigned".
+ * A foreign key only proves the user exists, not whose they are — without this
+ * a card could be given another garage's staff member, whose name and phone
+ * the job card then shows.
+ */
+const requireAssignee = async (garageId: string, userId: string | null | undefined, roles: readonly Role[], label: string) => {
+  if (!userId) return null;
+  const staff = isObjectIdHex(userId)
+    ? await db.query.users.findFirst({
+      columns: { _id: true, name: true },
+      where: and(eq(users._id, userId), eq(users.garageId, garageId), inArray(users.role, [...roles]))
+    })
+    : undefined;
+  if (!staff) throw new HttpError(`${label} not found in this garage`, 400);
+  return staff;
+};
+
+const staffName = async (garageId: string, userId: string | null): Promise<string | null> => {
+  if (!userId) return null;
+  const staff = await db.query.users.findFirst({
+    columns: { name: true },
+    where: and(eq(users._id, userId), eq(users.garageId, garageId))
+  });
+  return staff?.name ?? 'a former staff member';
+};
+
+const assignmentNote = (label: string, from: string | null, to: string | null): string => {
+  if (!from) return `${label} assigned: ${to}`;
+  if (!to) return `${label} unassigned (was ${from})`;
+  return `${label} changed from ${from} to ${to}`;
+};
+
+/** What an estimation is made of, independent of JSONB's key order. */
+const estimationContent = (e: Pick<IEstimation, 'parts' | 'labor' | 'discount' | 'taxRate'>) => JSON.stringify([
+  e.parts.map(p => [p.inventoryItem ?? null, p.partName, p.quantity, p.unitPrice]),
+  e.labor.map(l => [l.description, l.hours, l.ratePerHour]),
+  e.discount,
+  e.taxRate
+]);
 
 // The projections `.populate()` used on each endpoint, verbatim.
 const LIST_WITH = {
@@ -216,7 +264,34 @@ export const openJobCard = async ({ jobCardData, garageId, userId }: OpenInput):
     );
   }
 
+  // The reading can only go forward from the last visit that counts. Every
+  // earlier card is terminal (see the open-card check above), so that is the
+  // newest one not cancelled — a cancelled visit may never have been worked on.
+  // 0 is skipped as the legacy "not recorded". A genuinely lower reading
+  // (replaced meter, a mistyped earlier visit) is entered at the floor and then
+  // corrected by an owner or admin, with remarks, in updateJobCardProgress.
+  const lastVisit = await db.query.jobCards.findFirst({
+    columns: { odometerAtIntake: true, jobCardNumber: true },
+    where: and(
+      eq(jobCards.garageId, garageId),
+      eq(jobCards.vehicleId, input.vehicle),
+      ne(jobCards.status, 'cancelled'),
+      gt(jobCards.odometerAtIntake, 0)
+    ),
+    orderBy: [desc(jobCards.createdAt), desc(jobCards._id)]
+  });
+  if (lastVisit && input.odometerAtIntake < lastVisit.odometerAtIntake) {
+    throw new HttpError(
+      `Odometer reading cannot be lower than the last visit (${lastVisit.odometerAtIntake} km on ` +
+      `${lastVisit.jobCardNumber}). If the reading is genuinely lower, enter ${lastVisit.odometerAtIntake} ` +
+      'and an owner or admin can correct it afterwards with remarks.',
+      400
+    );
+  }
+
   const { vehicle: vehicleId, customer: customerId, assignedMechanic, assignedAdvisor, ...rest } = input;
+  await requireAssignee(garageId, assignedMechanic, MECHANIC_ROLES, 'Mechanic');
+  await requireAssignee(garageId, assignedAdvisor, ADVISOR_ROLES, 'Service advisor');
 
   const jobCard = await db.transaction(async tx => {
     const jobCardNumber = await nextJobCardNumber(tx, garageId);
@@ -242,16 +317,48 @@ interface UpdateProgressInput {
   jobCardId: string;
   garageId: string;
   userId: string;
+  role: Role;
   updateData: Record<string, unknown>;
 }
 
-export const updateJobCardProgress = async ({ jobCardId, garageId, userId, updateData }: UpdateProgressInput): Promise<ApiObject> => {
+export const updateJobCardProgress = async ({ jobCardId, garageId, userId, role, updateData }: UpdateProgressInput): Promise<ApiObject> => {
   const jobCard = await requireJobCard(jobCardId, garageId);
-  const { status, statusNotes, assignedMechanic, assignedAdvisor, ...changes } = runSchema(updateJobCardSchema, updateData);
+  const { status, statusNotes, odometerRemarks, assignedMechanic, assignedAdvisor, ...changes } = runSchema(updateJobCardSchema, updateData);
 
   const set: Partial<JobCardRow> = { ...changes };
   if (assignedMechanic !== undefined) set.assignedMechanicId = assignedMechanic;
   if (assignedAdvisor !== undefined) set.assignedAdvisorId = assignedAdvisor;
+  const history = [...jobCard.statusHistory];
+
+  // Who works the job is part of its history. Entries keep the card's current
+  // status so the timeline does not read as a status change; re-sending the
+  // current assignee is no change and records nothing.
+  const noteAssignment = async (label: string, roles: readonly Role[], next: string | null | undefined, currentId: string | null) => {
+    if (next === undefined || next === currentId) return;
+    const to = await requireAssignee(garageId, next, roles, label);
+    history.push(historyEntry(jobCard.status, userId, assignmentNote(label, await staffName(garageId, currentId), to?.name ?? null)));
+  };
+  await noteAssignment('Mechanic', MECHANIC_ROLES, assignedMechanic, jobCard.assignedMechanicId);
+  await noteAssignment('Service advisor', ADVISOR_ROLES, assignedAdvisor, jobCard.assignedAdvisorId);
+
+  // Changing a recorded reading is a correction, not data entry: owner/admin
+  // only, with a reason, and no floor — this is the way past openJobCard's
+  // "not below the last visit" rule. The note lands on the timeline both
+  // clients already render, so the next visit is checked against a reading
+  // whose change is on record.
+  if (changes.odometerAtIntake !== undefined && changes.odometerAtIntake !== jobCard.odometerAtIntake) {
+    if (role !== 'owner' && role !== 'admin') {
+      throw new HttpError('Only an owner or admin can change the odometer reading.', 403);
+    }
+    if (!odometerRemarks) {
+      throw new HttpError('Remarks are required when changing the odometer reading.', 400);
+    }
+    history.push(historyEntry(
+      jobCard.status,
+      userId,
+      `Odometer corrected from ${jobCard.odometerAtIntake} km to ${changes.odometerAtIntake} km. Remarks: ${odometerRemarks}`
+    ));
+  }
 
   // Handle status transition logic
   if (status && status !== jobCard.status) {
@@ -260,12 +367,13 @@ export const updateJobCardProgress = async ({ jobCardId, garageId, userId, updat
     }
 
     set.status = status;
-    set.statusHistory = [...jobCard.statusHistory, historyEntry(status, userId, statusNotes || '')];
+    history.push(historyEntry(status, userId, statusNotes || ''));
 
     if (status === 'delivered') {
       set.actualDeliveryDate = new Date();
     }
   }
+  if (history.length > jobCard.statusHistory.length) set.statusHistory = history;
 
   // Generate a one-time estimation approval token when sending to customer
   let estimationToken: string | undefined;
@@ -343,6 +451,7 @@ export const updateJobCardProgress = async ({ jobCardId, garageId, userId, updat
 interface EstimationInput {
   jobCardId: string;
   garageId: string;
+  userId: string;
   estimationData: Record<string, unknown>;
 }
 
@@ -390,7 +499,7 @@ export const computeEstimationTotals = ({
   };
 };
 
-export const calculateAndSaveEstimation = async ({ jobCardId, garageId, estimationData }: EstimationInput): Promise<ApiObject> => {
+export const calculateAndSaveEstimation = async ({ jobCardId, garageId, userId, estimationData }: EstimationInput): Promise<ApiObject> => {
   const jobCard = await requireJobCard(jobCardId, garageId);
   const { parts, labor, discount = 0, taxRate } = runSchema(estimationInputSchema, estimationData);
 
@@ -412,7 +521,30 @@ export const calculateAndSaveEstimation = async ({ jobCardId, garageId, estimati
     sentAt: jobCard.estimation.sentAt
   };
 
-  const [updated] = await db.update(jobCards).set({ estimation })
+  // Every save that changes what was quoted goes on the timeline — a price
+  // edit after the customer saw the estimate is exactly what an owner needs
+  // to be able to trace. Saving it unchanged records nothing.
+  const set: Partial<JobCardRow> = { estimation };
+  if (estimationContent(estimation) !== estimationContent(jobCard.estimation)) {
+    const garage = await db.query.garages.findFirst({
+      columns: { country: true, settings: true },
+      where: eq(garages._id, garageId)
+    });
+    const locale = resolveGarageLocale(garage);
+    const money = formatMoney(estimation.grandTotal, locale);
+    const items = `${estimation.parts.length} part${estimation.parts.length === 1 ? '' : 's'}, ` +
+      `${estimation.labor.length} labour item${estimation.labor.length === 1 ? '' : 's'}`;
+    // No "was" on the first estimate — there was nothing before it.
+    const previous = jobCard.estimation.parts.length || jobCard.estimation.labor.length
+      ? ` (was ${formatMoney(jobCard.estimation.grandTotal, locale)})`
+      : '';
+    set.statusHistory = [
+      ...jobCard.statusHistory,
+      historyEntry(jobCard.status, userId, `Estimation updated: ${items}, total ${money}${previous}`)
+    ];
+  }
+
+  const [updated] = await db.update(jobCards).set(set)
     .where(and(eq(jobCards._id, jobCardId), eq(jobCards.garageId, garageId)))
     .returning();
   return jobCardToApi(updated);
@@ -430,7 +562,7 @@ export const approveJobEstimation = async ({ jobCardId, garageId, userId }: Appr
   const [updated] = await db.update(jobCards).set({
     estimation: { ...jobCard.estimation, approvedByCustomer: true, approvedAt: new Date().toISOString() },
     status: jobCard.status === 'estimation_sent' ? 'approved' : jobCard.status,
-    statusHistory: [...jobCard.statusHistory, historyEntry('approved', userId, 'Estimation approved by customer')]
+    statusHistory: [...jobCard.statusHistory, historyEntry('approved', userId, 'Estimation approved on behalf of the customer')]
   }).where(and(eq(jobCards._id, jobCardId), eq(jobCards.garageId, garageId))).returning();
 
   return jobCardToApi(updated);

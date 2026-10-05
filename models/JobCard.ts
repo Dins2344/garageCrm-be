@@ -81,6 +81,8 @@ export const updateJobCardSchema = z.object({
   status: statusField.optional(),
   statusNotes: z.string().optional(),
   odometerAtIntake: odometerField.optional(),
+  /** Required (and checked in the usecase) only when odometerAtIntake actually changes. */
+  odometerRemarks: z.string().trim().max(500, 'Remarks cannot exceed 500 characters').optional(),
   expectedDeliveryDate: nullableDate().optional(),
   actualDeliveryDate: nullableDate().optional(),
   internalNotes: z.string().trim().optional()
@@ -118,13 +120,34 @@ export interface JobCardLookups {
   inventoryById?: Map<string, ApiObject>;
 }
 
+/**
+ * The note the customer's link approval has always carried. Entries written
+ * before `actor` existed are recognised by it, so they read "Customer" too
+ * without a data migration.
+ */
+export const LINK_APPROVAL_NOTE = 'Estimation approved by customer via approval link';
+
+/**
+ * Who a timeline entry shows as having made the change. The server decides,
+ * so both clients — including published mobile builds — render it as-is; the
+ * shape stays the `{ _id, name }` they already read.
+ */
+const changedByForApi = (entry: StatusHistoryEntry, usersById: Map<string, ApiObject>): ApiObject | null => {
+  if (entry.changedBy) {
+    // Staff accounts are deleted outright, so a miss means the person is gone.
+    return usersById.get(entry.changedBy) ?? { _id: entry.changedBy, name: 'Former staff member' };
+  }
+  if (entry.actor === 'customer' || entry.notes === LINK_APPROVAL_NOTE) return { _id: '', name: 'Customer' };
+  return null;
+};
+
 export const jobCardToApi = (row: object, lookups: JobCardLookups = {}): ApiObject => {
   const out = serializeRow(row);
 
   if (lookups.usersById && Array.isArray(out.statusHistory)) {
     out.statusHistory = (out.statusHistory as StatusHistoryEntry[]).map(entry => ({
       ...entry,
-      changedBy: (entry.changedBy && lookups.usersById!.get(entry.changedBy)) || entry.changedBy
+      changedBy: changedByForApi(entry, lookups.usersById!)
     }));
   }
 
