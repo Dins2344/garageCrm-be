@@ -62,6 +62,17 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
+// 5. No HTTP caching of API responses. On a 304, Android's OkHttp cache
+// rebuilds the response from the stored copy and merges in its headers —
+// including a days-old X-Token, which the app then saves as its session.
+// That signed users out seconds after login. No ETag means no 304; no-store
+// means nothing is cached to replay.
+app.set('etag', false);
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // HTTP request logging via morgan -> winston
 const morganStream = {
   write: (message: string) => {

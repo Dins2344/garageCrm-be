@@ -192,6 +192,23 @@ describe('Sliding session', () => {
     expect(res.headers['x-token']).toBeUndefined();
   });
 
+  // A 304 lets the client's HTTP cache replay a stale X-Token from an old
+  // response; the app stored it and every request after that 401'd.
+  it('never answers 304 and forbids caching, so no stale X-Token can be replayed', async () => {
+    const register = await registerGarageOwner({ email: 'slide5@example.com' });
+    const first = await request(app).get('/api/auth/me').set(authHeader(register.body.token));
+
+    expect(first.headers.etag).toBeUndefined();
+    expect(first.headers['cache-control']).toBe('no-store');
+
+    const again = await request(app)
+      .get('/api/auth/me')
+      .set(authHeader(register.body.token))
+      // What a phone sends: the ETag its cache stored from an old response.
+      .set('If-None-Match', 'W/"2a6-abc"');
+    expect(again.status).toBe(200);
+  });
+
   it('stamps the login time on tokens issued at login', async () => {
     const register = await registerGarageOwner({ email: 'slide4@example.com' });
     expect(decode(register.body.token).auth).toBeGreaterThan(0);
