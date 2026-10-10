@@ -794,6 +794,71 @@ const options: swaggerJsdoc.Options = {
           }
         },
 
+        ChangeRequest: {
+          type: 'object',
+          properties: {
+            _id: { type: 'string' },
+            garage: { type: 'string' },
+            type: { type: 'string', enum: ['odometer_correction', 'job_card_cancellation', 'invoice_cancellation'] },
+            status: { type: 'string', enum: ['pending', 'approved', 'rejected', 'withdrawn'] },
+            targetType: { type: 'string', enum: ['job_card', 'invoice'] },
+            target: { type: 'string', description: 'Job card or invoice id. An approved invoice cancellation deletes the invoice.' },
+            targetLabel: { type: 'string', example: 'JC-261010-0004' },
+            payload: {
+              type: 'object',
+              description: 'odometer_correction: { odometerAtIntake, remarks, previousOdometer }. Cancellations: { reason }.',
+              additionalProperties: true
+            },
+            requestedBy: { type: 'object', nullable: true, properties: { _id: { type: 'string' }, name: { type: 'string' }, role: { type: 'string' } } },
+            decidedBy: { type: 'object', nullable: true, properties: { _id: { type: 'string' }, name: { type: 'string' }, role: { type: 'string' } } },
+            decisionNote: { type: 'string' },
+            decidedAt: { type: 'string', format: 'date-time', nullable: true },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' }
+          }
+        },
+        RaiseChangeRequest: {
+          type: 'object',
+          required: ['type', 'targetId', 'payload'],
+          properties: {
+            type: { type: 'string', enum: ['odometer_correction', 'job_card_cancellation', 'invoice_cancellation'] },
+            targetId: { type: 'string', description: 'Job card id, or invoice id for invoice_cancellation' },
+            payload: {
+              type: 'object',
+              additionalProperties: true,
+              example: { reason: 'Customer declined the work' },
+              description: 'odometer_correction: { odometerAtIntake (integer >= 0), remarks (1-400 chars) }. Cancellations: { reason (1-500 chars) }.'
+            }
+          }
+        },
+        ChangeRequestDecision: {
+          type: 'object',
+          properties: { note: { type: 'string', maxLength: 500, description: 'Shown to the requester' } }
+        },
+        Notification: {
+          type: 'object',
+          properties: {
+            _id: { type: 'string' },
+            user: { type: 'string' },
+            garage: { type: 'string', description: 'Branch the event belongs to; switch to it before opening the entity' },
+            type: { type: 'string', enum: ['request_raised', 'request_approved', 'request_rejected'] },
+            title: { type: 'string', example: 'Cancellation requested' },
+            body: { type: 'string', example: 'Ravi asked to cancel JC-261010-0004: Customer declined' },
+            entityType: { type: 'string', example: 'change_request' },
+            entity: { type: 'string', description: 'Id of the entity, e.g. the change request' },
+            readAt: { type: 'string', format: 'date-time', nullable: true },
+            createdAt: { type: 'string', format: 'date-time' }
+          }
+        },
+        PushTokenRequest: {
+          type: 'object',
+          required: ['token'],
+          properties: {
+            token: { type: 'string', example: 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]' },
+            platform: { type: 'string', enum: ['android', 'ios'], default: 'android' }
+          }
+        },
+
         // ─── Paginated Response ───
         PaginatedResponse: {
           type: 'object',

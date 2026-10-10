@@ -29,6 +29,13 @@
       "when": 1789733495242,
       "tag": "0003_expenses",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791633418288,
+      "tag": "0004_change-requests",
+      "breakpoints": true
     }
   ]
 }

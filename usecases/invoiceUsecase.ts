@@ -216,9 +216,11 @@ interface RemoveInput {
   invoiceId: string;
   garageId: string;
   userId: string;
+  /** Appended to the reopened job card's timeline entry — who asked for it, and why. */
+  note?: string;
 }
 
-export const removeInvoice = async ({ invoiceId, garageId, userId }: RemoveInput): Promise<true> => {
+export const removeInvoice = async ({ invoiceId, garageId, userId, note }: RemoveInput): Promise<true> => {
   const invoice = await db.query.invoices.findFirst({
     where: and(eq(invoices._id, invoiceId), eq(invoices.garageId, garageId))
   });
@@ -247,13 +249,13 @@ export const removeInvoice = async ({ invoiceId, garageId, userId }: RemoveInput
         status: 'approved', // Revert to approved state so it can be edited/moved
         statusHistory: [
           ...jobCard.statusHistory,
-          historyEntry('approved', userId, `Invoice ${invoice.invoiceNumber} cancelled. Job reopened for editing.`)
+          historyEntry('approved', userId, `Invoice ${invoice.invoiceNumber} cancelled. Job reopened for editing.${note ? ` ${note}` : ''}`)
         ]
-      }).where(eq(jobCards._id, jobCard._id));
+      }).where(and(eq(jobCards._id, jobCard._id), eq(jobCards.garageId, garageId)));
       log.info('Job card reopened after invoice cancellation', { jobCardId: jobCard._id });
     }
 
-    await tx.delete(invoices).where(eq(invoices._id, invoiceId));
+    await tx.delete(invoices).where(and(eq(invoices._id, invoiceId), eq(invoices.garageId, garageId)));
   });
 
   log.info('Invoice deleted and job card reopened', { invoiceId, garageId });

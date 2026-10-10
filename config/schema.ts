@@ -37,7 +37,10 @@ import {
   AnyPgColumn
 } from 'drizzle-orm/pg-core';
 import { newId } from '../utils/ids';
-import { ExpenseCategory, PaymentMethod, Role, VerificationChannel } from '../types/domain';
+import {
+  ChangeRequestStatus, ChangeRequestTargetType, ChangeRequestType, ExpenseCategory, NotificationType,
+  PaymentMethod, Role, VerificationChannel
+} from '../types/domain';
 
 // ─── JSON shapes ──────────────────────────────────────────────────────────
 
@@ -410,6 +413,73 @@ export const expenses = pgTable('expenses', {
   index('expenses_garage_date_idx').on(t.garageId, t.expenseDate)
 ]);
 
+// ─── Change requests and notifications ────────────────────────────────────
+
+/**
+ * A staff member asking an owner or admin to make a change only they may make.
+ * `targetId` has no foreign key on purpose: approving an invoice cancellation
+ * deletes the invoice, and the request has to outlive it. `targetLabel` is the
+ * job card / invoice number at raise time, so the list still reads afterwards.
+ * `payload` is validated per type in `usecases/changeRequestTypes.ts`.
+ */
+export const changeRequests = pgTable('change_requests', {
+  _id: idColumn(),
+  garageId: text().notNull().references(() => garages._id, { onDelete: 'cascade' }),
+  type: text().$type<ChangeRequestType>().notNull(),
+  status: text().$type<ChangeRequestStatus>().notNull().default('pending'),
+  targetType: text().$type<ChangeRequestTargetType>().notNull(),
+  targetId: text().notNull(),
+  targetLabel: text().notNull().default(''),
+  payload: jsonb().$type<Record<string, unknown>>().notNull().default({}),
+  requestedById: text().references(() => users._id, { onDelete: 'set null' }),
+  decidedById: text().references(() => users._id, { onDelete: 'set null' }),
+  decisionNote: text().notNull().default(''),
+  decidedAt: ts(),
+  ...timestamps
+}, (t) => [
+  // One pending request per item per type is a database guarantee, not just a check.
+  uniqueIndex('change_requests_one_pending').on(t.type, t.targetId).where(sql`status = 'pending'`),
+  index('change_requests_garage_status_idx').on(t.garageId, t.status, t.createdAt),
+  index('change_requests_requester_idx').on(t.requestedById, t.createdAt)
+]);
+
+/**
+ * One row per recipient. Scoped by `userId`, not garage: an owner's bell covers
+ * every branch they own. `garageId` says which branch the event belongs to so a
+ * client can switch to it before opening the thing it is about.
+ */
+export const notifications = pgTable('notifications', {
+  _id: idColumn(),
+  userId: text().notNull().references(() => users._id, { onDelete: 'cascade' }),
+  garageId: text().notNull().references(() => garages._id, { onDelete: 'cascade' }),
+  type: text().$type<NotificationType>().notNull(),
+  title: text().notNull(),
+  body: text().notNull().default(''),
+  entityType: text().notNull().default(''),
+  entityId: text().notNull().default(''),
+  readAt: ts(),
+  ...timestamps
+}, (t) => [
+  index('notifications_user_created_idx').on(t.userId, t.createdAt),
+  index('notifications_entity_idx').on(t.entityType, t.entityId)
+]);
+
+/**
+ * An Expo push token. No `garageId`: a device belongs to a user, and an owner's
+ * one phone must receive pushes from every branch. `token` is unique, so a
+ * shared phone that changes hands moves to the new user on their first sign-in.
+ */
+export const pushTokens = pgTable('push_tokens', {
+  _id: idColumn(),
+  userId: text().notNull().references(() => users._id, { onDelete: 'cascade' }),
+  token: text().notNull(),
+  platform: text().$type<'android' | 'ios'>().notNull().default('android'),
+  ...timestamps
+}, (t) => [
+  uniqueIndex('push_tokens_token_unique').on(t.token),
+  index('push_tokens_user_idx').on(t.userId)
+]);
+
 export const garagesRelations = relations(garages, ({ one, many }) => ({
   owner: one(users, { fields: [garages.ownerId], references: [users._id], relationName: 'garageOwner' }),
   staff: many(users, { relationName: 'userGarage' })
@@ -462,6 +532,12 @@ export const serviceRemindersRelations = relations(serviceReminders, ({ one }) =
   customer: one(customers, { fields: [serviceReminders.customerId], references: [customers._id] }),
   garage: one(garages, { fields: [serviceReminders.garageId], references: [garages._id] }),
   jobCard: one(jobCards, { fields: [serviceReminders.jobCardId], references: [jobCards._id] })
+}));
+
+export const changeRequestsRelations = relations(changeRequests, ({ one }) => ({
+  garage: one(garages, { fields: [changeRequests.garageId], references: [garages._id] }),
+  requestedBy: one(users, { fields: [changeRequests.requestedById], references: [users._id], relationName: 'changeRequestRequester' }),
+  decidedBy: one(users, { fields: [changeRequests.decidedById], references: [users._id], relationName: 'changeRequestDecider' })
 }));
 
 /** Every table, in an order that satisfies foreign keys on insert. */
