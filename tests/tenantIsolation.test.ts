@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import app from '../app';
 import { db, schema } from './helpers/dbAccess';
-import { createGarageWithOwner, nextPhone, authHeader, authHeaderFor, addGarageToOwner } from './helpers/factories';
+import { createGarageWithOwner, nextPhone, authHeader, authHeaderFor, addGarageToOwner, insertStaff } from './helpers/factories';
 
 /**
  * The entire multi-tenant model relies on every query being scoped by
@@ -290,5 +290,39 @@ describe('Free-plan usage limits', () => {
         role: 'mechanic'
       });
     expect(third.status).toBe(403);
+  });
+
+  it("keeps Garage A's change requests and notifications away from Garage B", async () => {
+    const a = await createGarageWithOwner('tenant-cr-a');
+    const b = await createGarageWithOwner('tenant-cr-b');
+    const mechanic = await insertStaff(a.garageId, 'mechanic', 'tenant-cr-mech');
+    const post = (path: string, body: object) => request(app).post(path).set(authHeader(a.token)).send(body);
+    const customer = (await post('/api/customers', { name: 'Tenant CR', phone: nextPhone() })).body.data._id;
+    const vehicle = (await post('/api/vehicles', { licensePlate: 'KA01TC0001', make: 'Honda', model: 'City', customer })).body.data._id;
+    const jobCard = (await post('/api/jobcards', { serviceType: 'service', vehicle, customer, odometerAtIntake: 10 })).body.data._id;
+    const id = (await request(app).post('/api/change-requests').set(authHeader(mechanic.token))
+      .send({ type: 'job_card_cancellation', targetId: jobCard, payload: { reason: 'x' } })).body.data._id;
+
+    expect((await request(app).get(`/api/change-requests/${id}`).set(authHeader(b.token))).status).toBe(404);
+    expect((await request(app).put(`/api/change-requests/${id}/approve`).set(authHeader(b.token)).send({})).status).toBe(404);
+    expect((await request(app).put(`/api/change-requests/${id}/reject`).set(authHeader(b.token)).send({})).status).toBe(404);
+    expect((await request(app).put(`/api/change-requests/${id}/withdraw`).set(authHeader(b.token)).send({})).status).toBe(404);
+    expect((await request(app).get('/api/change-requests').set(authHeader(b.token))).body.total).toBe(0);
+
+    const notificationId = (await request(app).get('/api/notifications').set(authHeader(a.token))).body.data[0]._id;
+    expect((await request(app).put(`/api/notifications/${notificationId}/read`).set(authHeader(b.token)).send({})).status).toBe(404);
+    expect((await request(app).get('/api/notifications').set(authHeader(b.token))).body.total).toBe(0);
+
+    // A Garage B staff member cannot raise a request against Garage A's invoice.
+    const putA = (path: string, body: object = {}) => request(app).put(path).set(authHeader(a.token)).send(body);
+    await putA(`/api/jobcards/${jobCard}/estimation`, { parts: [], labor: [{ description: 'Service', hours: 1, ratePerHour: 500 }], discount: 0, taxRate: 18 });
+    await putA(`/api/jobcards/${jobCard}`, { status: 'estimation_sent' });
+    await putA(`/api/jobcards/${jobCard}/approve`);
+    const invoice = (await post('/api/invoices', { jobCardId: jobCard })).body.data._id;
+    const staffB = await insertStaff(b.garageId, 'mechanic', 'tenant-cr-mech-b');
+    const cross = await request(app).post('/api/change-requests').set(authHeader(staffB.token))
+      .send({ type: 'invoice_cancellation', targetId: invoice, payload: { reason: 'x' } });
+    expect(cross.status).toBe(404);
+    expect(cross.body.message).toBe('Invoice not found');
   });
 });

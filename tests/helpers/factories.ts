@@ -2,6 +2,8 @@ import request from 'supertest';
 import app from '../../app';
 import { db } from '../../config/db';
 import { admins } from '../../models/Admin';
+import { users } from '../../models/User';
+import type { Role } from '../../types/domain';
 import { hashPassword } from '../../utils/password';
 
 let phoneCounter = 0;
@@ -93,3 +95,18 @@ export async function loginAsSuperAdmin(): Promise<string> {
 }
 
 export const adminHeader = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+/**
+ * A staff member inserted straight into the database, then logged in through
+ * the real endpoint. Bypasses the free plan's two-staff cap, which fixtures
+ * needing an admin plus two staff would otherwise hit.
+ */
+export async function insertStaff(garageId: string, role: Role, suffix: string, name = `Staff ${suffix}`) {
+  const email = `staff-${suffix}@example.com`;
+  const [user] = await db.insert(users).values({
+    name, email, phone: nextPhone(), password: await hashPassword('password123'), role, garageId
+  }).returning({ _id: users._id });
+  const res = await request(app).post('/api/auth/login').send({ email, password: 'password123' });
+  if (!res.body.token) throw new Error(`Staff login failed in test setup: ${JSON.stringify(res.body)}`);
+  return { userId: user._id, token: res.body.token as string };
+}

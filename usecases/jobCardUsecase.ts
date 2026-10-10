@@ -360,6 +360,12 @@ export const updateJobCardProgress = async ({ jobCardId, garageId, userId, role,
     ));
   }
 
+  // Cancelling closes the card out for good, so like the odometer correction
+  // above it is owner/admin only; staff raise a change request instead.
+  if (status === 'cancelled' && jobCard.status !== 'cancelled' && role !== 'owner' && role !== 'admin') {
+    throw new HttpError('Only an owner or admin can cancel a job card. Raise a cancellation request instead.', 403);
+  }
+
   // Handle status transition logic
   if (status && status !== jobCard.status) {
     if (jobCard.status === 'cancelled') {

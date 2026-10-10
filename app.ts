@@ -23,6 +23,8 @@ import inventoryRoutes from './routes/inventory';
 import invoiceRoutes from './routes/invoices';
 import dashboardRoutes from './routes/dashboard';
 import reminderRoutes from './routes/reminders';
+import notificationRoutes from './routes/notifications';
+import changeRequestRoutes from './routes/changeRequests';
 import garageRoutes from './routes/garage';
 import publicRoutes from './routes/public';
 import metaRoutes from './routes/meta';
@@ -97,6 +99,8 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reminders', reminderRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/change-requests', changeRequestRoutes);
 app.use('/api/garage', garageRoutes);
 app.use('/api/meta', metaRoutes);     // No auth — static reference data
 app.use('/api/public', publicRoutes); // No auth — token-secured

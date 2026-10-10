@@ -67,3 +67,20 @@ export type ReminderStatus = (typeof REMINDER_STATUSES)[number];
 // clients' `types/models.ts`.
 export const VERIFICATION_CHANNELS = ['email', 'phone'] as const;
 export type VerificationChannel = (typeof VERIFICATION_CHANNELS)[number];
+
+// Change requests: a staff member asks an owner or admin to make a change only
+// they may make. Mirrored in both clients' `types/models.ts`.
+export const CHANGE_REQUEST_TYPES = ['odometer_correction', 'job_card_cancellation', 'invoice_cancellation'] as const;
+export type ChangeRequestType = (typeof CHANGE_REQUEST_TYPES)[number];
+
+export const CHANGE_REQUEST_STATUSES = ['pending', 'approved', 'rejected', 'withdrawn'] as const;
+export type ChangeRequestStatus = (typeof CHANGE_REQUEST_STATUSES)[number];
+
+export const CHANGE_REQUEST_TARGET_TYPES = ['job_card', 'invoice'] as const;
+export type ChangeRequestTargetType = (typeof CHANGE_REQUEST_TARGET_TYPES)[number];
+
+export const NOTIFICATION_TYPES = ['request_raised', 'request_approved', 'request_rejected'] as const;
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+/** Who decides change requests, and so never needs to raise one. */
+export const APPROVER_ROLES: readonly Role[] = ['owner', 'admin'];

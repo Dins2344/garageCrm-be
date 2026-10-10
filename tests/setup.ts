@@ -32,6 +32,12 @@ vi.mock('../services/smsService', () => ({
   formatPhoneE164: vi.fn((phone: string) => phone)
 }));
 
+// Never contact Expo during tests. tests/pushService.test.ts loads the real module.
+vi.mock('../services/pushService', () => ({
+  PUSH_CHANNEL_ID: 'requests',
+  sendPush: vi.fn().mockResolvedValue(undefined)
+}));
+
 // A real Postgres, in-process, per test file: the same migrations production
 // applies at boot run here, so tests exercise the actual constraints, foreign
 // keys and unique indexes rather than an approximation of them.

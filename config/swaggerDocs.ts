@@ -559,7 +559,11 @@
  *           fitting role (mechanic; owner/admin/service_advisor). Assignment
  *           changes are recorded on the status timeline.
  *       403:
- *         description: A role other than owner/admin tried to change the odometer reading
+ *         description: >-
+ *           A role other than owner/admin tried to change the odometer reading,
+ *           or staff (service_advisor, mechanic, receptionist) set status
+ *           'cancelled'. Staff must raise a change request instead
+ *           (POST /change-requests).
  *   delete:
  *     tags: [Job Cards]
  *     summary: Delete job card (owner/admin only)
@@ -2095,6 +2099,264 @@
  *           every user including anyone already on the newest build.
  *       401:
  *         description: Unauthorized
+ */
+
+// ════════════════════════════════════════
+// CHANGE REQUEST ROUTES
+// ════════════════════════════════════════
+
+/**
+ * @swagger
+ * /change-requests:
+ *   get:
+ *     tags: [Change Requests]
+ *     summary: List change requests
+ *     description: >
+ *       Owners and admins see every request in the active branch; other roles
+ *       see only the requests they raised. Newest first.
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [pending, approved, rejected, withdrawn] }
+ *       - in: query
+ *         name: type
+ *         schema: { type: string, enum: [odometer_correction, job_card_cancellation, invoice_cancellation] }
+ *       - in: query
+ *         name: targetId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Paginated list envelope of ChangeRequest
+ *       400:
+ *         description: Unknown status or type
+ *   post:
+ *     tags: [Change Requests]
+ *     summary: Ask an owner or admin to make a change (service_advisor, mechanic, receptionist)
+ *     description: Notifies the branch owner and its active admins, in-app and by push.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/RaiseChangeRequest'
+ *     responses:
+ *       201:
+ *         description: The pending request
+ *         content:
+ *           application/json:
+ *             schema: { type: object, properties: { success: { type: boolean }, data: { $ref: '#/components/schemas/ChangeRequest' } } }
+ *       400:
+ *         description: Unknown type, invalid payload, or the item is not eligible (already closed, same reading)
+ *       403:
+ *         description: Owners and admins make the change directly
+ *       404:
+ *         description: Job card or invoice not found in this garage
+ *       409:
+ *         description: A request of this type is already pending for this item
+ */
+
+/**
+ * @swagger
+ * /change-requests/{id}:
+ *   get:
+ *     tags: [Change Requests]
+ *     summary: Get one change request
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: ChangeRequest
+ *       404:
+ *         description: Not found, or raised by another staff member
+ */
+
+/**
+ * @swagger
+ * /change-requests/{id}/approve:
+ *   put:
+ *     tags: [Change Requests]
+ *     summary: Approve and apply (owner, admin)
+ *     description: >
+ *       Applies the change through the same code as a direct owner action. If
+ *       it cannot be applied the request stays pending and the error says why.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ChangeRequestDecision'
+ *     responses:
+ *       200:
+ *         description: The approved request
+ *       400:
+ *         description: Note longer than 500 characters, or the item can no longer take this change (for example the job card is already delivered or cancelled)
+ *       403:
+ *         description: Not an owner or admin
+ *       404:
+ *         description: Not found
+ *       409:
+ *         description: Already decided or withdrawn; the item no longer exists; or the odometer changed since the request was raised
+ */
+
+/**
+ * @swagger
+ * /change-requests/{id}/reject:
+ *   put:
+ *     tags: [Change Requests]
+ *     summary: Reject with an optional note (owner, admin)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ChangeRequestDecision'
+ *     responses:
+ *       200:
+ *         description: The rejected request
+ *       400:
+ *         description: Note longer than 500 characters
+ *       403:
+ *         description: Not an owner or admin
+ *       404:
+ *         description: Not found
+ *       409:
+ *         description: Already decided or withdrawn
+ */
+
+/**
+ * @swagger
+ * /change-requests/{id}/withdraw:
+ *   put:
+ *     tags: [Change Requests]
+ *     summary: Withdraw a pending request (the requester only)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: The withdrawn request
+ *       403:
+ *         description: Raised by someone else
+ *       404:
+ *         description: Not found
+ *       409:
+ *         description: Already decided or withdrawn
+ */
+
+// ════════════════════════════════════════
+// NOTIFICATION ROUTES
+// ════════════════════════════════════════
+
+/**
+ * @swagger
+ * /notifications:
+ *   get:
+ *     tags: [Notifications]
+ *     summary: The caller's notifications, newest first, across every branch
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Paginated list envelope of Notification
+ */
+
+/**
+ * @swagger
+ * /notifications/unread-count:
+ *   get:
+ *     tags: [Notifications]
+ *     summary: Unread count for the bell
+ *     responses:
+ *       200:
+ *         description: '{ success, data: { count } }'
+ */
+
+/**
+ * @swagger
+ * /notifications/read-all:
+ *   put:
+ *     tags: [Notifications]
+ *     summary: Mark every notification read
+ *     responses:
+ *       200:
+ *         description: '{ success, data: { updated } }'
+ */
+
+/**
+ * @swagger
+ * /notifications/{id}/read:
+ *   put:
+ *     tags: [Notifications]
+ *     summary: Mark one notification read
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: The notification
+ *       404:
+ *         description: Not found or not the caller's
+ */
+
+/**
+ * @swagger
+ * /notifications/push-token:
+ *   post:
+ *     tags: [Notifications]
+ *     summary: Register this device for push
+ *     description: Upserts on the token, so a shared phone moves to whoever signed in last.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/PushTokenRequest'
+ *     responses:
+ *       200:
+ *         description: Registered
+ *       400:
+ *         description: Not an Expo push token
+ *   delete:
+ *     tags: [Notifications]
+ *     summary: Unregister this device (on an explicit Log Out)
+ *     description: Removes the token only if it belongs to the caller.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/PushTokenRequest'
+ *     responses:
+ *       200:
+ *         description: Removed (or was not the caller's)
+ *       400:
+ *         description: Push token missing
  */
 
 export {};

@@ -49,9 +49,10 @@ const nullableId = z.preprocess(v => (v === '' ? null : v), z.string().nullable(
 // 9,999,999 km is far beyond any real vehicle — a value above this is a
 // data-entry error (e.g. digits accidentally entered twice), not a genuine
 // reading. Enforced here so no client can bypass it.
+export const ODOMETER_MAX: [number, string] = [9999999, 'Odometer reading looks too large — please check the value'];
 const odometerField = boundedNumber('Odometer reading is required', {
   min: [0, 'Odometer reading cannot be negative'],
-  max: [9999999, 'Odometer reading looks too large — please check the value']
+  max: ODOMETER_MAX
 });
 
 export const createJobCardSchema = z.object({

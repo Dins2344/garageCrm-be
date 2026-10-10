@@ -26,7 +26,7 @@ const brokenRefs = refs.map(r => r.split('/').pop()!).filter(n => !schemas.inclu
 // Read the mount prefixes from app.ts, then each router's own paths, and
 // normalise Express ':param' to OpenAPI '{param}'.
 const appSrc = fs.readFileSync(path.join(__dirname, '..', 'app.ts'), 'utf8');
-const mounts = [...appSrc.matchAll(/app\.use\('\/api\/([a-zA-Z]+)',\s*([a-zA-Z]+Routes)\)/g)]
+const mounts = [...appSrc.matchAll(/app\.use\('\/api\/([a-zA-Z-]+)',\s*([a-zA-Z]+Routes)\)/g)]
   .map(m => ({ prefix: `/${m[1]}`, file: m[2].replace(/Routes$/, '') }));
 
 const fileFor = (name: string) => {
