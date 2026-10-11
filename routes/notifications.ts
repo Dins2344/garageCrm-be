@@ -1,7 +1,7 @@
 import express from 'express';
 const router = express.Router();
 import {
-  getNotifications, getUnreadCount, readNotification, readAllNotifications, savePushToken, deletePushToken
+  getNotifications, getUnreadCount, streamNotifications, readNotification, readAllNotifications, savePushToken, deletePushToken
 } from '../controllers/notificationController';
 import { protect } from '../middleware/auth';
 
@@ -10,6 +10,7 @@ router.use(protect);
 
 router.get('/', getNotifications);
 router.get('/unread-count', getUnreadCount);
+router.get('/stream', streamNotifications);
 router.put('/read-all', readAllNotifications);
 router.put('/:id/read', readNotification);
 router.route('/push-token')

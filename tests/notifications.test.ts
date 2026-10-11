@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
+import type { AddressInfo } from 'net';
 import { eq } from 'drizzle-orm';
 import app from '../app';
 import { createGarageWithOwner, addGarageToOwner, authHeader, authHeaderFor } from './helpers/factories';
@@ -15,6 +16,16 @@ const seed = (userId: string, garageId: string, title = 'Cancellation requested'
   });
 const get = (token: string, path: string) => request(app).get(path).set(authHeader(token));
 const put = (token: string, path: string) => request(app).put(path).set(authHeader(token)).send({});
+const readUntil = async (reader: ReadableStreamDefaultReader<Uint8Array>, needle: string): Promise<string> => {
+  const decoder = new TextDecoder();
+  let text = '';
+  while (!text.includes(needle)) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+  }
+  return text;
+};
 
 describe('notifications', () => {
   beforeEach(() => vi.mocked(sendPush).mockClear());
@@ -142,6 +153,114 @@ describe('notifications', () => {
       expect(await ownerOf()).toBe(a.userId);
       await remove(a.token);
       expect(await ownerOf()).toBeUndefined();
+    });
+  });
+
+  describe('watchNotifications', () => {
+    it('tells each recipient once, and nobody else', async () => {
+      const a = await createGarageWithOwner('ntf-watch-a');
+      const b = await createGarageWithOwner('ntf-watch-b');
+      const heardA = vi.fn();
+      const heardB = vi.fn();
+      const stopA = notificationUsecase.watchNotifications(a.userId, heardA);
+      const stopB = notificationUsecase.watchNotifications(b.userId, heardB);
+      try {
+        await notificationUsecase.notifyUsers({
+          userIds: [a.userId, a.userId], garageId: a.garageId, type: 'request_raised',
+          title: 'T', body: 'B', entityType: 'change_request', entityId: ENTITY
+        });
+        expect(heardA).toHaveBeenCalledTimes(1);
+        expect(heardB).not.toHaveBeenCalled();
+      } finally {
+        stopA();
+        stopB();
+      }
+    });
+
+    it('tells the reader when they mark one or all read, so their other tabs update', async () => {
+      const a = await createGarageWithOwner('ntf-watch-read');
+      await seed(a.userId, a.garageId);
+      const id = (await get(a.token, '/api/notifications')).body.data[0]._id;
+      const heard = vi.fn();
+      const stop = notificationUsecase.watchNotifications(a.userId, heard);
+      try {
+        await put(a.token, `/api/notifications/${id}/read`);
+        expect(heard).toHaveBeenCalledTimes(1);
+        await put(a.token, '/api/notifications/read-all');
+        expect(heard).toHaveBeenCalledTimes(2);
+      } finally {
+        stop();
+      }
+    });
+
+    it('tells everyone whose alert markEntityRead cleared', async () => {
+      const a = await createGarageWithOwner('ntf-watch-entity-a');
+      const b = await createGarageWithOwner('ntf-watch-entity-b');
+      await seed(a.userId, a.garageId);
+      await seed(b.userId, b.garageId);
+      const heardA = vi.fn();
+      const heardB = vi.fn();
+      const stopA = notificationUsecase.watchNotifications(a.userId, heardA);
+      const stopB = notificationUsecase.watchNotifications(b.userId, heardB);
+      try {
+        await notificationUsecase.markEntityRead({ entityType: 'change_request', entityId: ENTITY, type: 'request_raised' });
+        expect(heardA).toHaveBeenCalledTimes(1);
+        expect(heardB).toHaveBeenCalledTimes(1);
+      } finally {
+        stopA();
+        stopB();
+      }
+    });
+
+    it('stops calling once unsubscribed', async () => {
+      const a = await createGarageWithOwner('ntf-watch-stop');
+      const heard = vi.fn();
+      notificationUsecase.watchNotifications(a.userId, heard)();
+
+      await seed(a.userId, a.garageId);
+
+      expect(heard).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('GET /api/notifications/stream', () => {
+    // A stream never finishes, so supertest cannot read it: use a real port and fetch.
+    it('streams changed to the browser, authenticated by its session cookie', async () => {
+      const a = await createGarageWithOwner('ntf-stream');
+      const server = app.listen(0);
+      const abort = new AbortController();
+      try {
+        const { port } = server.address() as AddressInfo;
+        const res = await fetch(`http://127.0.0.1:${port}/api/notifications/stream`, {
+          headers: { Cookie: `token=${a.token}` }, signal: abort.signal
+        });
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get('content-type')).toMatch(/^text\/event-stream/);
+        expect(res.headers.get('x-accel-buffering')).toBe('no');
+
+        const reader = res.body!.getReader();
+        expect(await readUntil(reader, 'retry:')).toContain('retry: 3000');
+        await put(a.token, '/api/notifications/read-all');
+        expect(await readUntil(reader, 'event: changed')).toContain('event: changed');
+      } finally {
+        abort.abort();
+        server.closeAllConnections();
+        await new Promise(resolve => server.close(resolve));
+      }
+    });
+
+    it('refuses a browser with no session', async () => {
+      expect((await request(app).get('/api/notifications/stream')).status).toBe(401);
+    });
+
+    it('refuses a deactivated user when their browser reconnects', async () => {
+      const a = await createGarageWithOwner('ntf-stream-off');
+      await db.update(schema.users).set({ isActive: false }).where(eq(schema.users._id, a.userId));
+
+      const res = await request(app).get('/api/notifications/stream').set('Cookie', `token=${a.token}`);
+
+      expect(res.status).toBe(403);
     });
   });
 

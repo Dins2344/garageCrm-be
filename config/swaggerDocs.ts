@@ -2297,6 +2297,32 @@
 
 /**
  * @swagger
+ * /notifications/stream:
+ *   get:
+ *     tags: [Notifications]
+ *     summary: Live "your unread count changed" signal for the web bell (Server-Sent Events)
+ *     description: >
+ *       Sends `event: changed` with `data: {}` whenever the caller's unread count may
+ *       have moved; it never carries notification content, so re-read
+ *       /notifications/unread-count on each one. Authenticated by the `token` cookie,
+ *       because EventSource cannot send an Authorization header. A `: ping` comment
+ *       every 25 s keeps proxies from timing out; the server ends the stream after
+ *       5 minutes and the browser reconnects after the `retry` hint (3000 ms).
+ *     responses:
+ *       200:
+ *         description: An endless text/event-stream (not the JSON envelope)
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       401:
+ *         description: No session, or it expired
+ *       403:
+ *         description: Account has been deactivated
+ */
+
+/**
+ * @swagger
  * /notifications/read-all:
  *   put:
  *     tags: [Notifications]
