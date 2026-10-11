@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '../config/db';
 import { notifications, notificationToApi } from '../models/Notification';
@@ -12,6 +13,23 @@ import { HttpError } from '../utils/httpError';
 import logger from '../utils/logger';
 
 const log = logger.child('NotificationUsecase');
+
+// ponytail: in-process fan-out reaches only streams held by this process. One
+// API container today; a second instance needs Redis pub/sub (Neon's pooled
+// connection string cannot LISTEN).
+const bus = new EventEmitter();
+bus.setMaxListeners(0); // one listener per open browser tab
+
+/** Calls `listener` whenever this user's unread count may have changed. Returns the unsubscribe. */
+export const watchNotifications = (userId: string, listener: () => void): (() => void) => {
+  bus.on(userId, listener);
+  return () => { bus.off(userId, listener); };
+};
+
+/** Fired after the write, never before: the listener's client re-reads the count straight away. */
+const announce = (userIds: string[]): void => {
+  for (const id of new Set(userIds)) bus.emit(id);
+};
 
 interface NotifyInput {
   userIds: string[];
@@ -35,6 +53,7 @@ export const notifyUsers = async ({ userIds, garageId, type, title, body, entity
     .values(recipients.map(userId => ({ userId, garageId, type, title, body, entityType, entityId })))
     .returning({ _id: notifications._id, userId: notifications.userId });
   log.info('Notifications stored', { type, entityType, entityId, recipients: rows.length });
+  announce(rows.map(row => row.userId));
 
   void sendPush(rows.map(row => ({
     userId: row.userId,
@@ -52,12 +71,13 @@ interface EntityInput {
 
 /** Every unread notification of this type about this entity no longer needs anyone's attention. */
 export const markEntityRead = async ({ entityType, entityId, type }: EntityInput): Promise<void> => {
-  await db.update(notifications).set({ readAt: new Date() }).where(and(
+  const rows = await db.update(notifications).set({ readAt: new Date() }).where(and(
     eq(notifications.entityType, entityType),
     eq(notifications.entityId, entityId),
     eq(notifications.type, type),
     isNull(notifications.readAt)
-  ));
+  )).returning({ userId: notifications.userId });
+  announce(rows.map(row => row.userId));
 };
 
 interface ListInput {
@@ -94,6 +114,7 @@ export const markRead = async ({ userId, notificationId }: { userId: string; not
       .returning()
     : [];
   if (!row) throw new HttpError('Notification not found', 404);
+  announce([userId]);
   return notificationToApi(row);
 };
 
@@ -101,6 +122,7 @@ export const markAllRead = async ({ userId }: { userId: string }): Promise<{ upd
   const rows = await db.update(notifications).set({ readAt: new Date() })
     .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
     .returning({ _id: notifications._id });
+  announce([userId]);
   return { updated: rows.length };
 };
 
