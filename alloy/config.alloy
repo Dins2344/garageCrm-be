@@ -1,0 +1,36 @@
+// Ships every container's stdout/stderr on this host to Grafana Cloud Loki.
+// Credentials come from ~/garagepulse/.env.alloy on EC2 — never committed.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// "/garagepulse-api" -> container="garagepulse-api"
+discovery.relabel "containers" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  labels        = { host = "garagepulse-ec2" }
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.write.grafana_cloud.receiver]
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_LOKI_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_LOKI_USER")
+      password = sys.env("GRAFANA_LOKI_TOKEN")
+    }
+  }
+}

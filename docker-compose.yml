@@ -48,6 +48,29 @@ services:
         max-size: "5m"
         max-file: "3"
 
+  # Ships all container logs on this host to Grafana Cloud. Reads Docker
+  # read-only; credentials live only in .env.alloy on the server. A missing
+  # .env.alloy breaks this service alone, never the API.
+  alloy:
+    image: grafana/alloy:v1.20.1
+    container_name: garagepulse-alloy
+    restart: unless-stopped
+    command: ["run", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    env_file:
+      - path: .env.alloy
+        required: false
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy/data
+    mem_limit: 256m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 volumes:
   uploads_data:
   logs_data:
+  alloy_data:
