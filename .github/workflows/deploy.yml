@@ -47,7 +47,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           timeout: 60s
-          source: "docker-compose.yml,nginx/"
+          source: "docker-compose.yml,nginx/,alloy/"
           target: "/home/${{ secrets.EC2_USER }}/garagepulse/"
 
       - name: Deploy on EC2
