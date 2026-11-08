@@ -308,6 +308,18 @@ Before pushing dependency changes: `npx -y npm@10 ci --dry-run`.
 
 ---
 
+## MyGarage
+
+`mygarage/` is a separate cloud-sync API for the MyGarage vehicle app. It is
+user-scoped (one Google account per user), not garage-scoped, and has its own
+database, env settings, migrations and tests. It lives entirely in `mygarage/`
+and must never exit the process: any failure only turns MyGarage off (503 on
+`/api/mygarage`) and GaragePulse keeps serving. To remove it, delete the
+folder and the lines it added to `app.ts`, `server.ts`, `Dockerfile`,
+`vitest.config.mts`, `scripts/checkSwagger.ts` and `.env.production.example`.
+
+---
+
 ## Reference
 
 | Topic | File |

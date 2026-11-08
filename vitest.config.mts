@@ -7,7 +7,7 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     testTimeout: 30000,
     hookTimeout: 60000,
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'mygarage/tests/**/*.test.ts'],
     fileParallelism: false
   }
 });
