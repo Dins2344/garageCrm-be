@@ -91,6 +91,34 @@ const options: swaggerJsdoc.Options = {
           }
         },
 
+        MyGarageChange: {
+          type: 'object',
+          required: ['tbl', 'id', 'updatedAt', 'deletedAt', 'payload'],
+          properties: {
+            tbl: { type: 'string', pattern: '^[a-z_]{1,40}$', example: 'vehicles' },
+            id: { type: 'string', minLength: 1, maxLength: 64 },
+            updatedAt: { type: 'integer', minimum: 0, description: 'Milliseconds since epoch; the larger value wins' },
+            deletedAt: { type: 'integer', minimum: 0, nullable: true },
+            payload: { type: 'string', maxLength: 65536, description: 'base64 ciphertext made on the phone' }
+          }
+        },
+        MyGaragePull: {
+          type: 'object',
+          properties: {
+            changes: {
+              type: 'array',
+              items: {
+                allOf: [
+                  { $ref: '#/components/schemas/MyGarageChange' },
+                  { type: 'object', properties: { seq: { type: 'integer' } } }
+                ]
+              }
+            },
+            next: { type: 'integer', description: 'Pass as since on the next call' },
+            more: { type: 'boolean' }
+          }
+        },
+
         // ─── Locale ───
         // Resolved server-side from the garage's `country` and returned on
         // garage and auth payloads. Clients must format money, dates and tax

@@ -1,6 +1,7 @@
 import express from 'express';
 import { isMyGarageReady } from '../config/db';
 import * as auth from '../controllers/authController';
+import * as sync from '../controllers/syncController';
 import { requireUser } from '../middleware/auth';
 import { authLimiter, userLimiter } from '../middleware/rateLimit';
 
@@ -28,5 +29,7 @@ router.post('/auth/sign-out', auth.signOut);
 router.use(requireUser, userLimiter);
 router.get('/me', auth.me);
 router.get('/key', auth.key);
+router.post('/sync/push', sync.push);
+router.get('/sync/pull', sync.pull);
 
 export default router;

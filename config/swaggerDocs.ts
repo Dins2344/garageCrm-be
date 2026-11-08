@@ -2516,6 +2516,72 @@
  *                     key: { type: string, description: base64 of 32 bytes }
  *       401:
  *         description: Session ended
+ * /mygarage/sync/push:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Push changed records
+ *     description: Last write wins on updatedAt. An equal or older updatedAt is skipped.
+ *     security: [{ MyGarageBearer: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [changes]
+ *             properties:
+ *               changes:
+ *                 type: array
+ *                 maxItems: 200
+ *                 items:
+ *                   $ref: '#/components/schemas/MyGarageChange'
+ *     responses:
+ *       200:
+ *         description: Counts of stored and skipped changes
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     accepted: { type: integer }
+ *                     skipped: { type: integer }
+ *       400:
+ *         description: Data not in the expected format
+ *       401:
+ *         description: Session ended
+ *       413:
+ *         description: Body over 1 MB
+ * /mygarage/sync/pull:
+ *   get:
+ *     tags: [MyGarage]
+ *     summary: Pull changes after a position
+ *     security: [{ MyGarageBearer: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: since
+ *         schema: { type: integer, minimum: 0, default: 0 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 500, default: 500 }
+ *     responses:
+ *       200:
+ *         description: A page of changes in seq order
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGaragePull'
+ *       400:
+ *         description: since is not a non-negative integer
+ *       401:
+ *         description: Session ended
  */
 
 export {};
