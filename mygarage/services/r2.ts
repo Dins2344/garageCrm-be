@@ -3,11 +3,14 @@ import { getMyGarageEnv } from '../config/env';
 import { isObjectIdHex } from '../../utils/ids';
 import { isFileId } from './ids';
 
+// One signal covers the call and its retries, so a hung R2 cannot hold a request open.
+const R2_TIMEOUT_MS = 10_000;
+
 let client: AwsClient | null = null;
 const aws = (): AwsClient => {
   if (!client) {
     const { accessKeyId, secretAccessKey } = getMyGarageEnv().r2;
-    client = new AwsClient({ accessKeyId, secretAccessKey, service: 's3', region: 'auto' });
+    client = new AwsClient({ accessKeyId, secretAccessKey, service: 's3', region: 'auto', retries: 2 });
   }
   return client;
 };
@@ -34,7 +37,7 @@ export const presignGet = (key: string, ttlSeconds: number): Promise<string> => 
 
 /** Size in bytes, or null when the object does not exist. Throws on any other failure. */
 export const headObjectSize = async (key: string): Promise<number | null> => {
-  const res = await aws().fetch(objectUrl(key), { method: 'HEAD' });
+  const res = await aws().fetch(objectUrl(key), { method: 'HEAD', signal: AbortSignal.timeout(R2_TIMEOUT_MS) });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`R2 HEAD failed with status ${res.status}`);
   return Number(res.headers.get('content-length'));
@@ -42,6 +45,6 @@ export const headObjectSize = async (key: string): Promise<number | null> => {
 
 /** A missing object counts as deleted. Throws on any other failure. */
 export const deleteObject = async (key: string): Promise<void> => {
-  const res = await aws().fetch(objectUrl(key), { method: 'DELETE' });
+  const res = await aws().fetch(objectUrl(key), { method: 'DELETE', signal: AbortSignal.timeout(R2_TIMEOUT_MS) });
   if (!res.ok && res.status !== 404) throw new Error(`R2 DELETE failed with status ${res.status}`);
 };

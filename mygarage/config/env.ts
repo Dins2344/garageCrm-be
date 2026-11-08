@@ -35,6 +35,11 @@ export const loadMyGarageEnv = (source: NodeJS.ProcessEnv = process.env): MyGara
     return null;
   }
 
+  if (get('MYGARAGE_DATABASE_URL') === source.DATABASE_URL) {
+    log.warn('MyGarage is off: a setting is invalid', { variable: 'MYGARAGE_DATABASE_URL' });
+    return null;
+  }
+
   const masterKey = Buffer.from(get('MYGARAGE_MASTER_KEY'), 'base64');
   if (masterKey.length !== 32) {
     log.warn('MyGarage is off: a setting is invalid', { variable: 'MYGARAGE_MASTER_KEY' });

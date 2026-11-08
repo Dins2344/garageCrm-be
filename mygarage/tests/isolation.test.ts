@@ -24,6 +24,7 @@ describe('loadMyGarageEnv', () => {
   it('returns null when the jwt secret equals JWT_SECRET', () => { expect(loadMyGarageEnv({ ...FULL, MYGARAGE_JWT_SECRET: FULL.JWT_SECRET })).toBeNull(); });
   it('returns null when the jwt secret equals SUPER_ADMIN_SECRET', () => { expect(loadMyGarageEnv({ ...FULL, MYGARAGE_JWT_SECRET: FULL.SUPER_ADMIN_SECRET })).toBeNull(); });
   it('returns null when the jwt secret is under 32 characters', () => { expect(loadMyGarageEnv({ ...FULL, MYGARAGE_JWT_SECRET: 'short' })).toBeNull(); });
+  it('returns null when it points at the GaragePulse database', () => { expect(loadMyGarageEnv({ ...FULL, DATABASE_URL: FULL.MYGARAGE_DATABASE_URL })).toBeNull(); });
   it('parses a complete set', () => { expect(loadMyGarageEnv(FULL)?.masterKey.length).toBe(32); });
 });
 
