@@ -30,6 +30,7 @@ router.post('/auth/sign-out', auth.signOut);
 router.use(requireUser, userLimiter);
 router.get('/me', auth.me);
 router.get('/key', auth.key);
+router.delete('/account', auth.deleteAccount);
 router.post('/sync/push', sync.push);
 router.get('/sync/pull', sync.pull);
 router.post('/files/:fileId/upload-url', files.uploadUrl);

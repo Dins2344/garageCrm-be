@@ -2495,6 +2495,26 @@
  *                   $ref: '#/components/schemas/MyGarageUser'
  *       401:
  *         description: Session ended
+ * /mygarage/account:
+ *   delete:
+ *     tags: [MyGarage]
+ *     summary: Delete the signed-in MyGarage account
+ *     description: Removes every stored file from cloud storage, then the account and all its synced data. Safe to retry after a 502.
+ *     security: [{ MyGarageBearer: [] }]
+ *     responses:
+ *       200:
+ *         description: Account deleted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: Account deleted }
+ *       401:
+ *         description: Session ended
+ *       502:
+ *         description: A file could not be removed; nothing else was deleted, try again
  * /mygarage/key:
  *   get:
  *     tags: [MyGarage]

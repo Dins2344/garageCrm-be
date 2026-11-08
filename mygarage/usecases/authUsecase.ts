@@ -1,8 +1,10 @@
 import jwt from 'jsonwebtoken';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { getMyGarageEnv } from '../config/env';
 import { users, refreshTokens, toApi } from '../models/User';
+import { cloudFiles } from '../config/schema';
+import { deleteObject, objectKey } from '../services/r2';
 import { verifyGoogleIdToken } from '../services/google';
 import { newDataKey, wrapKey, unwrapKey, newRefreshToken, hashToken } from '../services/crypto';
 import { newId } from '../../utils/ids';
@@ -80,3 +82,19 @@ export const getMe = async ({ userId }: { userId: string }) => toApi(await loadU
 
 export const getDataKey = async ({ userId }: { userId: string }): Promise<string> =>
   unwrapKey((await loadUser(userId)).wrappedKey, getMyGarageEnv().masterKey).toString('base64');
+
+/** Removes every R2 object first, then the user; cascades take the rest. A failure leaves the user in place so a retry finishes the job. */
+export const deleteAccount = async ({ userId }: { userId: string }): Promise<void> => {
+  const files = await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles).where(eq(cloudFiles.userId, userId));
+  for (const { fileId } of files) {
+    try {
+      await deleteObject(objectKey(userId, fileId));
+    } catch {
+      log.error('Account deletion stopped at a file', { userId, files: files.length });
+      throw new HttpError('Could not delete your files. Try again.', 502);
+    }
+    await mgDb.delete(cloudFiles).where(and(eq(cloudFiles.userId, userId), eq(cloudFiles.fileId, fileId)));
+  }
+  await mgDb.delete(users).where(eq(users.id, userId));
+  log.info('Account deleted', { userId, files: files.length });
+};

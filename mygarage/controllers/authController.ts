@@ -28,3 +28,8 @@ export const me = async (_req: Request, res: Response): Promise<void> => {
 export const key = async (_req: Request, res: Response): Promise<void> => {
   res.json({ success: true, data: { key: await authUsecase.getDataKey({ userId: res.locals.mgUserId }) } });
 };
+
+export const deleteAccount = async (_req: Request, res: Response): Promise<void> => {
+  await authUsecase.deleteAccount({ userId: res.locals.mgUserId });
+  res.json({ success: true, message: 'Account deleted' });
+};
