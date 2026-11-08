@@ -171,6 +171,39 @@ describe('MyGarage files', () => {
     expect(await row(s.user.id, F1)).toBeUndefined();
   });
 
+  it('a pushed files id that is not a UUID never reaches R2', async () => {
+    const a = await sign();
+    const b = await sign('other');
+    const res = await pushFile(a.accessToken, `../${b.user.id}/${F1}`, 11, 11);
+    expect(res.status).toBe(200);
+    expect(res.body.data.accepted).toBe(1);
+    expect(r2.deleteObject).not.toHaveBeenCalled();
+  });
+
+  it('complete deletes the object and the row when the total would pass 1 GB', async () => {
+    const s = await sign();
+    const seeded = Array.from({ length: 40 }, (_, i) => ({
+      userId: s.user.id,
+      fileId: `0190a1b2-c3d4-7e5f-8a6b-1000000000${String(i).padStart(2, '0')}`,
+      size: 25 * MB,
+      status: 'uploaded' as const
+    }));
+    await mgDb.insert(cloudFiles).values(seeded);
+    expect((await upload(s.accessToken, F1, 100)).status).toBe(200);
+    vi.mocked(r2.headObjectSize).mockResolvedValue(25 * MB);
+    const res = await complete(s.accessToken, F1);
+    expect(res.status).toBe(413);
+    expect(res.body.message).toBe('Your cloud storage is full (1 GB). This file stays on your phone.');
+    expect(r2.deleteObject).toHaveBeenCalledWith(`u/${s.user.id}/${F1}`);
+    expect(await row(s.user.id, F1)).toBeUndefined();
+  });
+
+  it('upload-url signs the declared size into the PUT', async () => {
+    const s = await sign();
+    await upload(s.accessToken, F1, 4321);
+    expect(r2.presignPut).toHaveBeenCalledWith(`u/${s.user.id}/${F1}`, 900, 4321);
+  });
+
   it('if R2 delete fails during push, the push still succeeds and the row stays', async () => {
     const s = await sign();
     await upload(s.accessToken, F2, 100);

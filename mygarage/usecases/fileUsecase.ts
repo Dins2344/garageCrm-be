@@ -13,6 +13,7 @@ export const URL_TTL_SECONDS = 900;
 
 const STORAGE_DOWN = 'File storage is unavailable right now. Try again later.';
 const TOO_LARGE = 'This file is too large to back up (25 MB limit).';
+const QUOTA_FULL = 'Your cloud storage is full (1 GB). This file stays on your phone.';
 const NOT_IN_CLOUD = 'This file is not in the cloud yet.';
 
 /** Runs an R2 call; any failure becomes a 502 with ids-only logging (signed URLs carry credentials). */
@@ -36,13 +37,13 @@ export const requestUpload = async ({ userId, fileId, size }: { userId: string; 
       .from(cloudFiles)
       .where(and(eq(cloudFiles.userId, userId), ne(cloudFiles.fileId, fileId)));
     if (Number(total) + size > USER_QUOTA_BYTES) {
-      throw new HttpError('Your cloud storage is full (1 GB). This file stays on your phone.', 413);
+      throw new HttpError(QUOTA_FULL, 413);
     }
     await tx.insert(cloudFiles)
       .values({ userId, fileId, size, status: 'pending' })
       .onConflictDoUpdate({ target: [cloudFiles.userId, cloudFiles.fileId], set: { size, status: 'pending', uploadedAt: null } });
   });
-  const url = await storage(userId, fileId, () => r2.presignPut(r2.objectKey(userId, fileId), URL_TTL_SECONDS));
+  const url = await storage(userId, fileId, () => r2.presignPut(r2.objectKey(userId, fileId), URL_TTL_SECONDS, size));
   return { url, expiresAt: expiry() };
 };
 
@@ -56,8 +57,24 @@ export const completeUpload = async ({ userId, fileId }: { userId: string; fileI
     await storage(userId, fileId, () => r2.deleteObject(key));
     throw new HttpError(TOO_LARGE, 413);
   }
-  await mgDb.update(cloudFiles).set({ size, status: 'uploaded', uploadedAt: new Date() })
-    .where(and(eq(cloudFiles.userId, userId), eq(cloudFiles.fileId, fileId)));
+  // The declared size may have been a lie, so the quota is checked again with the real one.
+  const fits = await mgDb.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}))`);
+    const [{ total }] = await tx.select({ total: sql<number>`coalesce(sum(${cloudFiles.size}), 0)::float8` })
+      .from(cloudFiles)
+      .where(and(eq(cloudFiles.userId, userId), ne(cloudFiles.fileId, fileId)));
+    const where = and(eq(cloudFiles.userId, userId), eq(cloudFiles.fileId, fileId));
+    if (Number(total) + size > USER_QUOTA_BYTES) {
+      await tx.delete(cloudFiles).where(where); // the object is removed below, so the row goes too
+      return false;
+    }
+    await tx.update(cloudFiles).set({ size, status: 'uploaded', uploadedAt: new Date() }).where(where);
+    return true;
+  });
+  if (!fits) {
+    await storage(userId, fileId, () => r2.deleteObject(key));
+    throw new HttpError(QUOTA_FULL, 413);
+  }
   return size;
 };
 

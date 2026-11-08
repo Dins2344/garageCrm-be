@@ -2,6 +2,7 @@ import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { syncRecords } from '../models/SyncRecord';
 import { removeCloudFile } from './fileUsecase';
+import { isFileId } from '../services/ids';
 import logger from '../../utils/logger';
 
 const log = logger.child('MyGarageSync');
@@ -36,6 +37,11 @@ export const pushChanges = async ({ userId, changes }: { userId: string; changes
   // After commit, so R2 calls never hold the per-user lock. A failure leaves the row for a later retry.
   for (const change of accepted) {
     if (change.tbl !== 'files' || change.deletedAt === null) continue;
+    // The id is client-supplied and only length-limited; it must never reach an R2 key unless it is a UUID.
+    if (!isFileId(change.id)) {
+      log.warn('Skipped cloud removal for a files row with a non-UUID id', { userId });
+      continue;
+    }
     try {
       await removeCloudFile({ userId, fileId: change.id });
     } catch {
