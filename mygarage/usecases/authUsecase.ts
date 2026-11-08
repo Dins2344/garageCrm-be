@@ -1,0 +1,82 @@
+import jwt from 'jsonwebtoken';
+import { eq } from 'drizzle-orm';
+import { mgDb } from '../config/db';
+import { getMyGarageEnv } from '../config/env';
+import { users, refreshTokens, toApi } from '../models/User';
+import { verifyGoogleIdToken } from '../services/google';
+import { newDataKey, wrapKey, unwrapKey, newRefreshToken, hashToken } from '../services/crypto';
+import { newId } from '../../utils/ids';
+import { HttpError } from '../../utils/httpError';
+import logger from '../../utils/logger';
+
+const log = logger.child('MyGarageAuth');
+
+export const SESSION_ENDED = 'Your session has ended. Sign in again.';
+const REFRESH_DAYS = 90;
+
+export type Session = { accessToken: string; refreshToken: string; user: { id: string; email: string } };
+
+const signAccess = (userId: string): string =>
+  jwt.sign({ typ: 'mg-access' }, getMyGarageEnv().jwtSecret, { subject: userId, expiresIn: '1h', algorithm: 'HS256' });
+
+const issueSession = async (tx: Pick<typeof mgDb, 'insert'>, user: { id: string; email: string }): Promise<Session> => {
+  const refreshToken = newRefreshToken();
+  await tx.insert(refreshTokens).values({
+    tokenHash: hashToken(refreshToken),
+    userId: user.id,
+    expiresAt: new Date(Date.now() + REFRESH_DAYS * 24 * 60 * 60 * 1000)
+  });
+  return { accessToken: signAccess(user.id), refreshToken, user: { id: user.id, email: user.email } };
+};
+
+export const signInWithGoogle = async ({ idToken }: { idToken: string }): Promise<Session> => {
+  const env = getMyGarageEnv();
+  const { sub, email } = await verifyGoogleIdToken(idToken, env.googleWebClientId);
+  // A second device signing in at the same moment must not fail on the unique googleSub.
+  await mgDb.insert(users)
+    .values({ id: newId(), googleSub: sub, email, wrappedKey: wrapKey(newDataKey(), env.masterKey) })
+    .onConflictDoNothing({ target: users.googleSub });
+  let [user] = await mgDb.select().from(users).where(eq(users.googleSub, sub)).limit(1);
+  if (user.email !== email) {
+    [user] = await mgDb.update(users).set({ email }).where(eq(users.id, user.id)).returning();
+  }
+  const session = await issueSession(mgDb, user);
+  log.info('Signed in', { userId: user.id });
+  return session;
+};
+
+export const refreshSession = async ({ refreshToken }: { refreshToken: string }): Promise<Session> =>
+  mgDb.transaction(async (tx) => {
+    const [row] = await tx.delete(refreshTokens).where(eq(refreshTokens.tokenHash, hashToken(refreshToken))).returning();
+    if (!row || row.expiresAt.getTime() <= Date.now()) throw new HttpError(SESSION_ENDED, 401);
+    const [user] = await tx.select().from(users).where(eq(users.id, row.userId)).limit(1);
+    if (!user) throw new HttpError(SESSION_ENDED, 401);
+    return issueSession(tx, user);
+  });
+
+export const signOut = async ({ refreshToken }: { refreshToken: string }): Promise<void> => {
+  await mgDb.delete(refreshTokens).where(eq(refreshTokens.tokenHash, hashToken(refreshToken)));
+};
+
+/** Resolves an access token to its user id, or null for any problem. */
+export const userIdFromAccessToken = async (token: string): Promise<string | null> => {
+  try {
+    const payload = jwt.verify(token, getMyGarageEnv().jwtSecret, { algorithms: ['HS256'] });
+    if (typeof payload === 'string' || payload.typ !== 'mg-access' || !payload.sub) return null;
+    const [user] = await mgDb.select({ id: users.id }).from(users).where(eq(users.id, payload.sub)).limit(1);
+    return user?.id ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const loadUser = async (userId: string) => {
+  const [user] = await mgDb.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) throw new HttpError(SESSION_ENDED, 401);
+  return user;
+};
+
+export const getMe = async ({ userId }: { userId: string }) => toApi(await loadUser(userId));
+
+export const getDataKey = async ({ userId }: { userId: string }): Promise<string> =>
+  unwrapKey((await loadUser(userId)).wrappedKey, getMyGarageEnv().masterKey).toString('base64');

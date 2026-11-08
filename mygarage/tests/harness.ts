@@ -5,6 +5,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import * as schema from '../config/schema';
 import { setMgDb, MG_MIGRATIONS_FOLDER, MgDb } from '../config/db';
 import { setMyGarageEnv, MyGarageEnv } from '../config/env';
+import { authStore, userStore } from '../middleware/rateLimit';
 
 export const TEST_ENV: MyGarageEnv = {
   databaseUrl: 'postgresql://unused',
@@ -27,6 +28,8 @@ export const useMyGarageDb = (): void => {
   }, 60000);
 
   afterEach(async () => {
+    await authStore.resetAll();
+    await userStore.resetAll();
     await pglite.exec('TRUNCATE TABLE users, refresh_tokens, sync_records, cloud_files CASCADE');
   });
 

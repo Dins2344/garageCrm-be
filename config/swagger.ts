@@ -42,6 +42,12 @@ const options: swaggerJsdoc.Options = {
             'protected response to a token older than 60s carries a fresh one in the X-Token header (and the ' +
             'httpOnly cookie for web). Clients must store the replacement. Sliding stops 12h after login.'
         },
+        MyGarageBearer: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Access token from /mygarage/auth/google or /mygarage/auth/refresh. Valid for 1 hour.'
+        },
         AdminAuth: {
           type: 'http',
           scheme: 'bearer',
@@ -65,6 +71,23 @@ const options: swaggerJsdoc.Options = {
           properties: {
             success: { type: 'boolean', example: true },
             message: { type: 'string', example: 'Operation completed' }
+          }
+        },
+
+        // ─── MyGarage ───
+        MyGarageUser: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: '65f0c0a1b2c3d4e5f6a7b8c9' },
+            email: { type: 'string', example: 'owner@example.com' }
+          }
+        },
+        MyGarageSession: {
+          type: 'object',
+          properties: {
+            accessToken: { type: 'string', description: 'JWT, valid for 1 hour' },
+            refreshToken: { type: 'string', description: 'Single use, valid for 90 days' },
+            user: { $ref: '#/components/schemas/MyGarageUser' }
           }
         },
 

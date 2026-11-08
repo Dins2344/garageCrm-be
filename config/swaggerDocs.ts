@@ -28,6 +28,8 @@
  *     description: Public endpoints (no auth required)
  *   - name: Meta
  *     description: Static reference data (no auth required)
+ *   - name: MyGarage
+ *     description: MyGarage app cloud sync (separate Google sign-in, not GaragePulse accounts)
  *   - name: Admin
  *     description: Platform super-admin console — cross-tenant, separate auth
  *   - name: Health
@@ -2383,6 +2385,121 @@
  *         description: Removed (or was not the caller's)
  *       400:
  *         description: Push token missing
+ */
+
+// --- MyGarage ---
+
+/**
+ * @swagger
+ * /mygarage/auth/google:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Sign in with a Google id token
+ *     description: Creates the user on first sign-in. The token must be for the MyGarage web client id.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [idToken]
+ *             properties:
+ *               idToken: { type: string }
+ *     responses:
+ *       200:
+ *         description: Signed in
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/MyGarageSession'
+ *       400:
+ *         description: Body missing or not valid
+ *       401:
+ *         description: Google sign-in failed
+ *       429:
+ *         description: Too many attempts
+ * /mygarage/auth/refresh:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Swap a refresh token for a new session
+ *     description: Refresh tokens are single use. The old one stops working.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken: { type: string }
+ *     responses:
+ *       200:
+ *         description: New session
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/MyGarageSession'
+ *       400:
+ *         description: Body missing or not valid
+ *       401:
+ *         description: Refresh token unknown, used or expired
+ *       429:
+ *         description: Too many attempts
+ * /mygarage/auth/sign-out:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Revoke a refresh token
+ *     description: Succeeds for any well-formed body, even if the token is unknown.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken: { type: string }
+ *     responses:
+ *       200:
+ *         description: Signed out
+ *       400:
+ *         description: Body missing or not valid
+ *       429:
+ *         description: Too many attempts
+ * /mygarage/me:
+ *   get:
+ *     tags: [MyGarage]
+ *     summary: The signed-in MyGarage user
+ *     security: [{ MyGarageBearer: [] }]
+ *     responses:
+ *       200:
+ *         description: The user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/MyGarageUser'
+ *       401:
+ *         description: Session ended
+ * /mygarage/key:
+ *   get:
+ *     tags: [MyGarage]
+ *     summary: The user data key
+ *     description: 32 random bytes, base64. The phone encrypts its records with it. Stable for the life of the account.
+ *     security: [{ MyGarageBearer: [] }]
+ *     responses:
+ *       200:
+ *         description: The key
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 key: { type: string, description: base64 of 32 bytes }
+ *       401:
+ *         description: Session ended
  */
 
 export {};
