@@ -2412,7 +2412,11 @@
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/MyGarageSession'
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGarageSession'
  *       400:
  *         description: Body missing or not valid
  *       401:
@@ -2440,7 +2444,11 @@
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/MyGarageSession'
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGarageSession'
  *       400:
  *         description: Body missing or not valid
  *       401:
@@ -2480,7 +2488,11 @@
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/MyGarageUser'
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGarageUser'
  *       401:
  *         description: Session ended
  * /mygarage/key:
@@ -2497,7 +2509,11 @@
  *             schema:
  *               type: object
  *               properties:
- *                 key: { type: string, description: base64 of 32 bytes }
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     key: { type: string, description: base64 of 32 bytes }
  *       401:
  *         description: Session ended
  */

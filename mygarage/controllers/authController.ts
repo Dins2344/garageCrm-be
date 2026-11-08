@@ -9,11 +9,11 @@ const field = (req: Request, name: 'idToken' | 'refreshToken'): string => {
 };
 
 export const google = async (req: Request, res: Response): Promise<void> => {
-  res.json(await authUsecase.signInWithGoogle({ idToken: field(req, 'idToken') }));
+  res.json({ success: true, data: await authUsecase.signInWithGoogle({ idToken: field(req, 'idToken') }) });
 };
 
 export const refresh = async (req: Request, res: Response): Promise<void> => {
-  res.json(await authUsecase.refreshSession({ refreshToken: field(req, 'refreshToken') }));
+  res.json({ success: true, data: await authUsecase.refreshSession({ refreshToken: field(req, 'refreshToken') }) });
 };
 
 export const signOut = async (req: Request, res: Response): Promise<void> => {
@@ -22,9 +22,9 @@ export const signOut = async (req: Request, res: Response): Promise<void> => {
 };
 
 export const me = async (_req: Request, res: Response): Promise<void> => {
-  res.json(await authUsecase.getMe({ userId: res.locals.mgUserId }));
+  res.json({ success: true, data: await authUsecase.getMe({ userId: res.locals.mgUserId }) });
 };
 
 export const key = async (_req: Request, res: Response): Promise<void> => {
-  res.json({ key: await authUsecase.getDataKey({ userId: res.locals.mgUserId }) });
+  res.json({ success: true, data: { key: await authUsecase.getDataKey({ userId: res.locals.mgUserId }) } });
 };

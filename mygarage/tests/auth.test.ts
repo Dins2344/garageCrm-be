@@ -20,7 +20,15 @@ vi.mock('../services/google', () => ({
 
 useMyGarageDb();
 
-const signIn = (idToken = 'good') => request(app).post('/api/mygarage/auth/google').send({ idToken });
+const signIn = async (idToken = 'good') => {
+  const res = await request(app).post('/api/mygarage/auth/google').send({ idToken });
+  // Success bodies are { success: true, data }; tests read the session from res.body.
+  if (res.status === 200) {
+    expect(res.body.success).toBe(true);
+    res.body = res.body.data;
+  }
+  return res;
+};
 const ENDED = 'Your session has ended. Sign in again.';
 
 describe('MyGarage auth', () => {
@@ -58,7 +66,7 @@ describe('MyGarage auth', () => {
     const { body } = await signIn();
     const ok = await request(app).get('/api/mygarage/me').set(authHeader(body.accessToken));
     expect(ok.status).toBe(200);
-    expect(ok.body).toEqual({ id: body.user.id, email: 'a@example.com' });
+    expect(ok.body).toEqual({ success: true, data: { id: body.user.id, email: 'a@example.com' } });
     for (const headers of [{}, authHeader('garbage')]) {
       const res = await request(app).get('/api/mygarage/me').set(headers);
       expect(res.status).toBe(401);
@@ -91,6 +99,8 @@ describe('MyGarage auth', () => {
     const first = (await signIn()).body;
     const res = await request(app).post('/api/mygarage/auth/refresh').send({ refreshToken: first.refreshToken });
     expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    res.body = res.body.data;
     expect(res.body.refreshToken).not.toBe(first.refreshToken);
     expect(res.body.user.id).toBe(first.user.id);
     const old = await request(app).post('/api/mygarage/auth/refresh').send({ refreshToken: first.refreshToken });
@@ -112,7 +122,7 @@ describe('MyGarage auth', () => {
   it('GET /key is stable per user and different between users', async () => {
     const a = (await signIn()).body;
     const b = (await signIn('other')).body;
-    const key = async (t: string) => (await request(app).get('/api/mygarage/key').set(authHeader(t))).body.key as string;
+    const key = async (t: string) => (await request(app).get('/api/mygarage/key').set(authHeader(t))).body.data.key as string;
     const k1 = await key(a.accessToken);
     expect(Buffer.from(k1, 'base64')).toHaveLength(32);
     expect(await key(a.accessToken)).toBe(k1);
@@ -158,8 +168,8 @@ describe('MyGarage logging', () => {
   it('nothing personal is logged', async () => {
     const spy = vi.spyOn(logger, 'write');
     const s = (await signIn('secret-id-token')).body;
-    const r = (await request(app).post('/api/mygarage/auth/refresh').send({ refreshToken: s.refreshToken })).body;
-    const k = (await request(app).get('/api/mygarage/key').set(authHeader(r.accessToken))).body.key as string;
+    const r = (await request(app).post('/api/mygarage/auth/refresh').send({ refreshToken: s.refreshToken })).body.data;
+    const k = (await request(app).get('/api/mygarage/key').set(authHeader(r.accessToken))).body.data.key as string;
     await signIn('bad');
     const logged = JSON.stringify(spy.mock.calls);
     spy.mockRestore();
