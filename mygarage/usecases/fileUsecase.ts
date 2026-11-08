@@ -1,6 +1,6 @@
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { mgDb } from '../config/db';
-import { cloudFiles } from '../config/schema';
+import { cloudFiles, syncRecords } from '../config/schema';
 import * as r2 from '../services/r2';
 import { HttpError } from '../../utils/httpError';
 import logger from '../../utils/logger';
@@ -28,11 +28,37 @@ const storage = async <T>(userId: string, fileId: string, call: () => Promise<T>
 
 const expiry = (): string => new Date(Date.now() + URL_TTL_SECONDS * 1000).toISOString();
 
+/**
+ * Cloud rows whose file was deleted on the phone (a failed R2 delete at push time leaves one)
+ * would count against the quota forever. Delete the object, then the row; a failure keeps the row.
+ * ponytail: runs R2 calls under the user lock, fine for the handful a user has, batch outside it if that changes.
+ */
+const sweepDeletedFiles = async (tx: Pick<typeof mgDb, 'select' | 'delete'>, userId: string): Promise<void> => {
+  const stale = await tx.select({ fileId: cloudFiles.fileId }).from(cloudFiles)
+    .innerJoin(syncRecords, and(
+      eq(syncRecords.userId, cloudFiles.userId),
+      eq(syncRecords.tbl, 'files'),
+      eq(syncRecords.id, cloudFiles.fileId),
+      sql`${syncRecords.deletedAt} is not null`))
+    .where(eq(cloudFiles.userId, userId));
+  const gone: string[] = [];
+  for (const { fileId } of stale) {
+    try {
+      await r2.deleteObject(r2.objectKey(userId, fileId));
+      gone.push(fileId);
+    } catch {
+      log.error('Cloud file cleanup failed', { userId, fileId });
+    }
+  }
+  if (gone.length) await tx.delete(cloudFiles).where(and(eq(cloudFiles.userId, userId), inArray(cloudFiles.fileId, gone)));
+};
+
 export const requestUpload = async ({ userId, fileId, size }: { userId: string; fileId: string; size: number }): Promise<{ url: string; expiresAt: string }> => {
   if (size > MAX_FILE_BYTES) throw new HttpError(TOO_LARGE, 413);
   // Serialise per user so two requests cannot both pass the quota check.
   await mgDb.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}))`);
+    await sweepDeletedFiles(tx, userId);
     const [{ total }] = await tx.select({ total: sql<number>`coalesce(sum(${cloudFiles.size}), 0)::float8` })
       .from(cloudFiles)
       .where(and(eq(cloudFiles.userId, userId), ne(cloudFiles.fileId, fileId)));
@@ -63,16 +89,15 @@ export const completeUpload = async ({ userId, fileId }: { userId: string; fileI
     const [{ total }] = await tx.select({ total: sql<number>`coalesce(sum(${cloudFiles.size}), 0)::float8` })
       .from(cloudFiles)
       .where(and(eq(cloudFiles.userId, userId), ne(cloudFiles.fileId, fileId)));
-    const where = and(eq(cloudFiles.userId, userId), eq(cloudFiles.fileId, fileId));
-    if (Number(total) + size > USER_QUOTA_BYTES) {
-      await tx.delete(cloudFiles).where(where); // the object is removed below, so the row goes too
-      return false;
-    }
-    await tx.update(cloudFiles).set({ size, status: 'uploaded', uploadedAt: new Date() }).where(where);
+    if (Number(total) + size > USER_QUOTA_BYTES) return false;
+    await tx.update(cloudFiles).set({ size, status: 'uploaded', uploadedAt: new Date() })
+      .where(and(eq(cloudFiles.userId, userId), eq(cloudFiles.fileId, fileId)));
     return true;
   });
   if (!fits) {
+    // Object first, row second: if the delete fails the row stays, so the quota still counts the object.
     await storage(userId, fileId, () => r2.deleteObject(key));
+    await mgDb.delete(cloudFiles).where(and(eq(cloudFiles.userId, userId), eq(cloudFiles.fileId, fileId)));
     throw new HttpError(QUOTA_FULL, 413);
   }
   return size;
@@ -86,7 +111,7 @@ export const requestDownload = async ({ userId, fileId }: { userId: string; file
   return { url, expiresAt: expiry() };
 };
 
-/** Object first, row second: a failure leaves the row so a later push can retry. */
+/** Object first, row second: a failure leaves the row, which the next upload request cleans up. */
 export const removeCloudFile = async ({ userId, fileId }: { userId: string; fileId: string }): Promise<void> => {
   await r2.deleteObject(r2.objectKey(userId, fileId));
   await mgDb.delete(cloudFiles).where(and(eq(cloudFiles.userId, userId), eq(cloudFiles.fileId, fileId)));

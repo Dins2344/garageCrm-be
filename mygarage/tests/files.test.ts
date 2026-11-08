@@ -171,6 +171,28 @@ describe('MyGarage files', () => {
     expect(await row(s.user.id, F1)).toBeUndefined();
   });
 
+  it('a stale delete from an old phone leaves the cloud file alone', async () => {
+    const s = await sign();
+    await upload(s.accessToken, F1, 100);
+    await pushFile(s.accessToken, F1, 20, null);
+    const res = await pushFile(s.accessToken, F1, 10, 10);
+    expect(res.body.data).toEqual({ accepted: 0, skipped: 1 });
+    expect(r2.deleteObject).not.toHaveBeenCalled();
+    expect(await row(s.user.id, F1)).toBeDefined();
+  });
+
+  it('a leftover row for a deleted file stops counting toward the quota', async () => {
+    const s = await sign();
+    await mgDb.insert(cloudFiles).values({ userId: s.user.id, fileId: F2, size: 1024 * MB, status: 'uploaded' });
+    expect((await upload(s.accessToken, F1, 100)).status).toBe(413);
+    vi.mocked(r2.deleteObject).mockRejectedValueOnce(new Error('boom'));
+    await pushFile(s.accessToken, F2, 11, 11); // delete fails, row stays
+    expect(await row(s.user.id, F2)).toBeDefined();
+    expect((await upload(s.accessToken, F1, 100)).status).toBe(200);
+    expect(r2.deleteObject).toHaveBeenLastCalledWith(`u/${s.user.id}/${F2}`);
+    expect(await row(s.user.id, F2)).toBeUndefined();
+  });
+
   it('a pushed files id that is not a UUID never reaches R2', async () => {
     const a = await sign();
     const b = await sign('other');

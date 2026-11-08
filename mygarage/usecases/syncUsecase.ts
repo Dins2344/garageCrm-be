@@ -34,7 +34,7 @@ export const pushChanges = async ({ userId, changes }: { userId: string; changes
     }
     return stored;
   });
-  // After commit, so R2 calls never hold the per-user lock. A failure leaves the row for a later retry.
+  // After commit, so R2 calls never hold the per-user lock. A failure leaves the cloud row, which the user's next upload request cleans up.
   for (const change of accepted) {
     if (change.tbl !== 'files' || change.deletedAt === null) continue;
     // The id is client-supplied and only length-limited; it must never reach an R2 key unless it is a UUID.
