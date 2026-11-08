@@ -193,6 +193,22 @@ describe('MyGarage files', () => {
     expect(await row(s.user.id, F2)).toBeUndefined();
   });
 
+  it('a push for the same user completes while the upload sweep waits on R2', async () => {
+    const s = await sign();
+    await mgDb.insert(cloudFiles).values({ userId: s.user.id, fileId: F2, size: 100, status: 'uploaded' });
+    vi.mocked(r2.deleteObject).mockRejectedValueOnce(new Error('boom'));
+    await pushFile(s.accessToken, F2, 11, 11); // delete fails, row stays for the sweep
+    let release!: () => void;
+    const hang = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(r2.deleteObject).mockImplementationOnce(() => hang);
+    const pending = Promise.resolve(upload(s.accessToken, F1, 100));
+    await vi.waitFor(() => expect(r2.deleteObject).toHaveBeenCalledTimes(2));
+    const res = await pushFile(s.accessToken, F1, 5, null);
+    expect(res.status).toBe(200);
+    release();
+    expect((await pending).status).toBe(200);
+  });
+
   it('a pushed files id that is not a UUID never reaches R2', async () => {
     const a = await sign();
     const b = await sign('other');

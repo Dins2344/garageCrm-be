@@ -31,16 +31,18 @@ const expiry = (): string => new Date(Date.now() + URL_TTL_SECONDS * 1000).toISO
 /**
  * Cloud rows whose file was deleted on the phone (a failed R2 delete at push time leaves one)
  * would count against the quota forever. Delete the object, then the row; a failure keeps the row.
- * ponytail: runs R2 calls under the user lock, fine for the handful a user has, batch outside it if that changes.
+ * ponytail: runs before the transaction, never under the user lock (R2 calls take up to 10 s each, and holding a pool
+ * connection through an outage would starve every user). Capped at 10 rows per request; the rest go on later uploads.
  */
-const sweepDeletedFiles = async (tx: Pick<typeof mgDb, 'select' | 'delete'>, userId: string): Promise<void> => {
-  const stale = await tx.select({ fileId: cloudFiles.fileId }).from(cloudFiles)
+const sweepDeletedFiles = async (db: Pick<typeof mgDb, 'select' | 'delete'>, userId: string): Promise<void> => {
+  const stale = await db.select({ fileId: cloudFiles.fileId }).from(cloudFiles)
     .innerJoin(syncRecords, and(
       eq(syncRecords.userId, cloudFiles.userId),
       eq(syncRecords.tbl, 'files'),
       eq(syncRecords.id, cloudFiles.fileId),
       sql`${syncRecords.deletedAt} is not null`))
-    .where(eq(cloudFiles.userId, userId));
+    .where(eq(cloudFiles.userId, userId))
+    .limit(10);
   const gone: string[] = [];
   for (const { fileId } of stale) {
     try {
@@ -50,15 +52,15 @@ const sweepDeletedFiles = async (tx: Pick<typeof mgDb, 'select' | 'delete'>, use
       log.error('Cloud file cleanup failed', { userId, fileId });
     }
   }
-  if (gone.length) await tx.delete(cloudFiles).where(and(eq(cloudFiles.userId, userId), inArray(cloudFiles.fileId, gone)));
+  if (gone.length) await db.delete(cloudFiles).where(and(eq(cloudFiles.userId, userId), inArray(cloudFiles.fileId, gone)));
 };
 
 export const requestUpload = async ({ userId, fileId, size }: { userId: string; fileId: string; size: number }): Promise<{ url: string; expiresAt: string }> => {
   if (size > MAX_FILE_BYTES) throw new HttpError(TOO_LARGE, 413);
+  await sweepDeletedFiles(mgDb, userId);
   // Serialise per user so two requests cannot both pass the quota check.
   await mgDb.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}))`);
-    await sweepDeletedFiles(tx, userId);
     const [{ total }] = await tx.select({ total: sql<number>`coalesce(sum(${cloudFiles.size}), 0)::float8` })
       .from(cloudFiles)
       .where(and(eq(cloudFiles.userId, userId), ne(cloudFiles.fileId, fileId)));
