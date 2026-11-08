@@ -5,7 +5,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import * as schema from '../config/schema';
 import { setMgDb, MG_MIGRATIONS_FOLDER, MgDb } from '../config/db';
 import { setMyGarageEnv, MyGarageEnv } from '../config/env';
-import { authStore, userStore } from '../middleware/rateLimit';
+import { authStore, authSessionStore, userStore } from '../middleware/rateLimit';
 
 export const TEST_ENV: MyGarageEnv = {
   databaseUrl: 'postgresql://unused',
@@ -15,6 +15,9 @@ export const TEST_ENV: MyGarageEnv = {
   r2: { accountId: 'test', accessKeyId: 'test', secretAccessKey: 'test', bucket: 'test' }
 };
 
+/** The real in-process database, for tests that wrap it to inject failures. */
+export let testDb: MgDb;
+
 /** Gives a test file its own in-process MyGarage database. Call once at the top level. */
 export const useMyGarageDb = (): void => {
   let pglite: PGlite;
@@ -23,12 +26,14 @@ export const useMyGarageDb = (): void => {
     pglite = new PGlite();
     const instance = drizzle(pglite, { schema, casing: 'snake_case' });
     await migrate(instance, { migrationsFolder: MG_MIGRATIONS_FOLDER });
-    setMgDb(instance as unknown as MgDb);
+    testDb = instance as unknown as MgDb;
+    setMgDb(testDb);
     setMyGarageEnv(TEST_ENV);
   }, 60000);
 
   afterEach(async () => {
     await authStore.resetAll();
+    await authSessionStore.resetAll();
     await userStore.resetAll();
     await pglite.exec('TRUNCATE TABLE users, refresh_tokens, sync_records, cloud_files CASCADE');
   });

@@ -145,7 +145,7 @@ describe('MyGarage sync', () => {
     const res = await request(app).post('/api/mygarage/sync/push').set(authHeader(t))
       .send({ changes: [change('a', 1, { payload: 'A'.repeat(1_100_000) })] });
     expect(res.status).toBe(413);
-    expect(res.body.success).toBe(false);
+    expect(res.body).toEqual({ success: false, message: 'Too much data in one request.' });
   });
 
   it('nothing personal is logged', async () => {

@@ -4,7 +4,8 @@ import * as auth from '../controllers/authController';
 import * as sync from '../controllers/syncController';
 import * as files from '../controllers/fileController';
 import { requireUser } from '../middleware/auth';
-import { authLimiter, userLimiter } from '../middleware/rateLimit';
+import { authLimiter, authSessionLimiter, userLimiter } from '../middleware/rateLimit';
+import { mgErrorHandler } from '../middleware/errorHandler';
 
 const router = express.Router();
 
@@ -21,10 +22,9 @@ router.use((_req, res, next) => {
   next();
 });
 
-router.use('/auth', authLimiter);
-router.post('/auth/google', auth.google);
-router.post('/auth/refresh', auth.refresh);
-router.post('/auth/sign-out', auth.signOut);
+router.post('/auth/google', authLimiter, auth.google);
+router.post('/auth/refresh', authSessionLimiter, auth.refresh);
+router.post('/auth/sign-out', authSessionLimiter, auth.signOut);
 
 // Everything below needs a signed-in user.
 router.use(requireUser, userLimiter);
@@ -36,5 +36,7 @@ router.get('/sync/pull', sync.pull);
 router.post('/files/:fileId/upload-url', files.uploadUrl);
 router.post('/files/:fileId/complete', files.complete);
 router.get('/files/:fileId/download-url', files.downloadUrl);
+
+router.use(mgErrorHandler);
 
 export default router;

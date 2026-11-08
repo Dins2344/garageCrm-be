@@ -149,6 +149,13 @@ describe('MyGarage limits', () => {
     expect(last.body).toEqual({ success: false, message: 'Too many attempts. Try again in a few minutes.' });
   });
 
+  it('refresh is not stopped by the sign-in limit', async () => {
+    const hit = () => request(app).post('/api/mygarage/auth/refresh').send({ refreshToken: 'nope' });
+    let last = await hit();
+    for (let i = 0; i < 30; i++) last = await hit();
+    expect(last.status).toBe(401);
+  });
+
   it('counts by the rightmost X-Forwarded-For entry, not a client-supplied one', async () => {
     const hit = (xff: string) => request(app).post('/api/mygarage/auth/google').set('X-Forwarded-For', xff).send({ idToken: 'bad' });
     for (let i = 0; i < 30; i++) await hit(`10.0.0.${i}, 5.5.5.5`);

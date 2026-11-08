@@ -62,14 +62,17 @@ export const signOut = async ({ refreshToken }: { refreshToken: string }): Promi
 
 /** Resolves an access token to its user id, or null for any problem. */
 export const userIdFromAccessToken = async (token: string): Promise<string | null> => {
+  let sub: string;
   try {
     const payload = jwt.verify(token, getMyGarageEnv().jwtSecret, { algorithms: ['HS256'] });
     if (typeof payload === 'string' || payload.typ !== 'mg-access' || !payload.sub) return null;
-    const [user] = await mgDb.select({ id: users.id }).from(users).where(eq(users.id, payload.sub)).limit(1);
-    return user?.id ?? null;
+    sub = payload.sub;
   } catch {
     return null;
   }
+  // Outside the try: a database failure must surface as 503, not as a signed-out user.
+  const [user] = await mgDb.select({ id: users.id }).from(users).where(eq(users.id, sub)).limit(1);
+  return user?.id ?? null;
 };
 
 const loadUser = async (userId: string) => {

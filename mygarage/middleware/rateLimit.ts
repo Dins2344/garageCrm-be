@@ -2,6 +2,7 @@ import { rateLimit, MemoryStore, ipKeyGenerator } from 'express-rate-limit';
 
 // Exported so the test harness can reset counts between tests.
 export const authStore = new MemoryStore();
+export const authSessionStore = new MemoryStore();
 export const userStore = new MemoryStore();
 
 const WINDOW_MS = 10 * 60 * 1000;
@@ -25,7 +26,21 @@ export const authLimiter = rateLimit({
   message: { success: false, message: 'Too many attempts. Try again in a few minutes.' },
   keyGenerator: (req) => clientIp(req.headers['x-forwarded-for'] as string | undefined, req.ip),
   // We read X-Forwarded-For ourselves, which is what this check warns about.
-  validate: { xForwardedForHeader: false }
+  // The key already goes through ipKeyGenerator inside clientIp.
+  validate: { xForwardedForHeader: false, keyGeneratorIpFallback: false }
+});
+
+// Refresh and sign-out are cheap and happen on every app start, so they get a looser cap.
+export const authSessionLimiter = rateLimit({
+  windowMs: WINDOW_MS,
+  limit: 300,
+  store: authSessionStore,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many attempts. Try again in a few minutes.' },
+  keyGenerator: (req) => clientIp(req.headers['x-forwarded-for'] as string | undefined, req.ip),
+  // The key already goes through ipKeyGenerator inside clientIp.
+  validate: { xForwardedForHeader: false, keyGeneratorIpFallback: false }
 });
 
 export const userLimiter = rateLimit({
