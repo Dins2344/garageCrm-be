@@ -2582,6 +2582,110 @@
  *         description: since is not a non-negative integer
  *       401:
  *         description: Session ended
+ * /mygarage/files/{fileId}/upload-url:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Get a signed URL to upload an encrypted file
+ *     description: PUT the ciphertext to the returned URL, then call complete. Size is in ciphertext bytes. Limits are 25 MB per file and 1 GB per user.
+ *     security: [{ MyGarageBearer: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: fileId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [size]
+ *             properties:
+ *               size: { type: integer, minimum: 1, maximum: 26214400 }
+ *     responses:
+ *       200:
+ *         description: A signed upload URL
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGarageFileUrl'
+ *       400:
+ *         description: fileId is not a UUID or size is not valid
+ *       401:
+ *         description: Session ended
+ *       413:
+ *         description: File over 25 MB, or the cloud storage quota is full
+ *       502:
+ *         description: File storage is unavailable
+ * /mygarage/files/{fileId}/complete:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Confirm an upload finished
+ *     description: Checks the object in storage and records its real size.
+ *     security: [{ MyGarageBearer: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: fileId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: The stored size in bytes
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     size: { type: integer }
+ *       400:
+ *         description: fileId is not a UUID
+ *       401:
+ *         description: Session ended
+ *       404:
+ *         description: No upload was requested for this file
+ *       409:
+ *         description: The object is not in storage yet
+ *       413:
+ *         description: The uploaded object is over 25 MB and was removed
+ *       502:
+ *         description: File storage is unavailable
+ * /mygarage/files/{fileId}/download-url:
+ *   get:
+ *     tags: [MyGarage]
+ *     summary: Get a signed URL to download an encrypted file
+ *     security: [{ MyGarageBearer: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: fileId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: A signed download URL
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGarageFileUrl'
+ *       400:
+ *         description: fileId is not a UUID
+ *       401:
+ *         description: Session ended
+ *       404:
+ *         description: The file is not in the cloud yet, or belongs to someone else
+ *       502:
+ *         description: File storage is unavailable
  */
 
 export {};

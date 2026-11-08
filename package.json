@@ -19,6 +19,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "aws4fetch": "^1.0.20",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",

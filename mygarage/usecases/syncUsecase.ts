@@ -1,6 +1,7 @@
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { syncRecords } from '../models/SyncRecord';
+import { removeCloudFile } from './fileUsecase';
 import logger from '../../utils/logger';
 
 const log = logger.child('MyGarageSync');
@@ -16,7 +17,7 @@ export const pushChanges = async ({ userId, changes }: { userId: string; changes
     const stored: Change[] = [];
     for (const change of changes) {
       const [row] = await tx.insert(syncRecords)
-        .values({ userId, ...change })
+        .values({ ...change, userId })
         .onConflictDoUpdate({
           target: [syncRecords.userId, syncRecords.tbl, syncRecords.id],
           set: {
@@ -32,6 +33,15 @@ export const pushChanges = async ({ userId, changes }: { userId: string; changes
     }
     return stored;
   });
+  // After commit, so R2 calls never hold the per-user lock. A failure leaves the row for a later retry.
+  for (const change of accepted) {
+    if (change.tbl !== 'files' || change.deletedAt === null) continue;
+    try {
+      await removeCloudFile({ userId, fileId: change.id });
+    } catch {
+      log.error('Cloud file removal failed', { userId, fileId: change.id });
+    }
+  }
   log.info('Pushed', { userId, accepted: accepted.length, skipped: changes.length - accepted.length });
   return { accepted, skipped: changes.length - accepted.length };
 };

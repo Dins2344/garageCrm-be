@@ -102,6 +102,13 @@ const options: swaggerJsdoc.Options = {
             payload: { type: 'string', maxLength: 65536, description: 'base64 ciphertext made on the phone' }
           }
         },
+        MyGarageFileUrl: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'Signed R2 URL. Treat as a secret; do not log it.' },
+            expiresAt: { type: 'string', format: 'date-time', description: 'The URL stops working at this time (15 minutes)' }
+          }
+        },
         MyGaragePull: {
           type: 'object',
           properties: {
