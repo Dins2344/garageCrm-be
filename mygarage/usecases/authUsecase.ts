@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { getMyGarageEnv } from '../config/env';
 import { users, refreshTokens, toApi } from '../models/User';
@@ -15,6 +15,7 @@ const log = logger.child('MyGarageAuth');
 
 export const SESSION_ENDED = 'Your session has ended. Sign in again.';
 const REFRESH_DAYS = 90;
+const R2_DELETE_CHUNK = 10;
 
 export type Session = { accessToken: string; refreshToken: string; user: { id: string; email: string } };
 
@@ -89,14 +90,16 @@ export const getDataKey = async ({ userId }: { userId: string }): Promise<string
 /** Removes every R2 object first, then the user; cascades take the rest. A failure leaves the user in place so a retry finishes the job. */
 export const deleteAccount = async ({ userId }: { userId: string }): Promise<void> => {
   const files = await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles).where(eq(cloudFiles.userId, userId));
-  for (const { fileId } of files) {
-    try {
-      await deleteObject(objectKey(userId, fileId));
-    } catch {
-      log.error('Account deletion stopped at a file', { userId, files: files.length });
+  for (let i = 0; i < files.length; i += R2_DELETE_CHUNK) {
+    const chunk = files.slice(i, i + R2_DELETE_CHUNK);
+    const results = await Promise.allSettled(chunk.map(({ fileId }) => deleteObject(objectKey(userId, fileId))));
+    const gone = chunk.filter((_, n) => results[n].status === 'fulfilled').map((f) => f.fileId);
+    if (gone.length) await mgDb.delete(cloudFiles).where(and(eq(cloudFiles.userId, userId), inArray(cloudFiles.fileId, gone)));
+    if (gone.length < chunk.length) {
+      const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      log.error('Account deletion stopped at a file', { userId, files: files.length, errorName: (failed?.reason as Error | undefined)?.name });
       throw new HttpError('Could not delete your files. Try again.', 502);
     }
-    await mgDb.delete(cloudFiles).where(and(eq(cloudFiles.userId, userId), eq(cloudFiles.fileId, fileId)));
   }
   await mgDb.delete(users).where(eq(users.id, userId));
   log.info('Account deleted', { userId, files: files.length });

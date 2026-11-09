@@ -89,4 +89,33 @@ describe('MyGarage account deletion', () => {
     expect((await del(a.accessToken)).status).toBe(200);
     expect(await counts(a.user.id)).toEqual({ users: 0, tokens: 0, sync: 0, files: 0 });
   });
+
+  it('with 25 files, deletes every object and every row', async () => {
+    const a = await sign();
+    const ids = Array.from({ length: 25 }, (_, n) => `0190a1b2-c3d4-7e5f-8a6b-${String(n).padStart(12, '0')}`);
+    await mgDb.insert(cloudFiles).values(ids.map((fileId) => ({ userId: a.user.id, fileId, size: 10, status: 'uploaded' as const })));
+    expect((await del(a.accessToken)).status).toBe(200);
+    expect(vi.mocked(r2.deleteObject)).toHaveBeenCalledTimes(25);
+    expect(await counts(a.user.id)).toEqual({ users: 0, tokens: 0, sync: 0, files: 0 });
+  });
+
+  it('when one object in the second chunk fails, keeps the user and only that row', async () => {
+    const a = await sign();
+    const ids = Array.from({ length: 25 }, (_, n) => `0190a1b2-c3d4-7e5f-8a6b-${String(n).padStart(12, '0')}`);
+    await mgDb.insert(cloudFiles).values(ids.map((fileId) => ({ userId: a.user.id, fileId, size: 10, status: 'uploaded' as const })));
+    const first = (await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles).where(eq(cloudFiles.userId, a.user.id)))[14].fileId;
+    const bad = `u/${a.user.id}/${first}`;
+    vi.mocked(r2.deleteObject).mockImplementation(async (key: string) => {
+      if (key === bad) throw new Error('boom');
+    });
+    const res = await del(a.accessToken);
+    expect(res.status).toBe(502);
+    expect((await counts(a.user.id)).users).toBe(1);
+    const called = vi.mocked(r2.deleteObject).mock.calls.map((c) => c[0]);
+    expect(called).toHaveLength(20);
+    const deleted = called.filter((k) => k !== bad).map((k) => k.split('/')[2]);
+    const left = (await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles).where(eq(cloudFiles.userId, a.user.id))).map((r) => r.fileId);
+    expect(left.sort()).toEqual(ids.filter((id) => !deleted.includes(id)).sort());
+    expect(left).toHaveLength(6);
+  });
 });
