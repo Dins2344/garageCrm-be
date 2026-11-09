@@ -103,10 +103,14 @@ describe('MyGarage account deletion', () => {
     const a = await sign();
     const ids = Array.from({ length: 25 }, (_, n) => `0190a1b2-c3d4-7e5f-8a6b-${String(n).padStart(12, '0')}`);
     await mgDb.insert(cloudFiles).values(ids.map((fileId) => ({ userId: a.user.id, fileId, size: 10, status: 'uploaded' as const })));
-    const first = (await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles).where(eq(cloudFiles.userId, a.user.id)))[14].fileId;
-    const bad = `u/${a.user.id}/${first}`;
+    // The 15th call is in the second chunk of 10, whatever order the rows come back in.
+    let calls = 0;
+    let bad = '';
     vi.mocked(r2.deleteObject).mockImplementation(async (key: string) => {
-      if (key === bad) throw new Error('boom');
+      if (++calls === 15) {
+        bad = key;
+        throw new Error('boom');
+      }
     });
     const res = await del(a.accessToken);
     expect(res.status).toBe(502);
