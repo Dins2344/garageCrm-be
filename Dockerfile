@@ -30,6 +30,7 @@ RUN npm ci --omit=dev
 # config/db.ts applies at boot (resolved as dist/config/../drizzle).
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/drizzle ./drizzle
+COPY --from=builder /app/mygarage/drizzle ./mygarage/drizzle
 
 # Create logs directory with proper permissions
 RUN mkdir -p logs uploads && chown -R garagepulse:garagepulse /app

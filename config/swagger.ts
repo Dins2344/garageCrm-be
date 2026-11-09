@@ -42,6 +42,12 @@ const options: swaggerJsdoc.Options = {
             'protected response to a token older than 60s carries a fresh one in the X-Token header (and the ' +
             'httpOnly cookie for web). Clients must store the replacement. Sliding stops 12h after login.'
         },
+        MyGarageBearer: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Access token from /mygarage/auth/google or /mygarage/auth/refresh. Valid for 1 hour.'
+        },
         AdminAuth: {
           type: 'http',
           scheme: 'bearer',
@@ -65,6 +71,58 @@ const options: swaggerJsdoc.Options = {
           properties: {
             success: { type: 'boolean', example: true },
             message: { type: 'string', example: 'Operation completed' }
+          }
+        },
+
+        // ─── MyGarage ───
+        MyGarageUser: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: '65f0c0a1b2c3d4e5f6a7b8c9' },
+            email: { type: 'string', example: 'owner@example.com' }
+          }
+        },
+        MyGarageSession: {
+          type: 'object',
+          properties: {
+            accessToken: { type: 'string', description: 'JWT, valid for 1 hour' },
+            refreshToken: { type: 'string', description: 'Single use, valid for 90 days' },
+            user: { $ref: '#/components/schemas/MyGarageUser' }
+          }
+        },
+
+        MyGarageChange: {
+          type: 'object',
+          required: ['tbl', 'id', 'updatedAt', 'deletedAt', 'payload'],
+          properties: {
+            tbl: { type: 'string', pattern: '^[a-z_]{1,40}$', example: 'vehicles' },
+            id: { type: 'string', minLength: 1, maxLength: 64 },
+            updatedAt: { type: 'integer', minimum: 0, description: 'Milliseconds since epoch; the larger value wins' },
+            deletedAt: { type: 'integer', minimum: 0, nullable: true },
+            payload: { type: 'string', maxLength: 65536, description: 'base64 ciphertext made on the phone' }
+          }
+        },
+        MyGarageFileUrl: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'Signed R2 URL. Treat as a secret; do not log it.' },
+            expiresAt: { type: 'string', format: 'date-time', description: 'The URL stops working at this time (15 minutes)' }
+          }
+        },
+        MyGaragePull: {
+          type: 'object',
+          properties: {
+            changes: {
+              type: 'array',
+              items: {
+                allOf: [
+                  { $ref: '#/components/schemas/MyGarageChange' },
+                  { type: 'object', properties: { seq: { type: 'integer' } } }
+                ]
+              }
+            },
+            next: { type: 'integer', description: 'Pass as since on the next call' },
+            more: { type: 'boolean' }
           }
         },
 

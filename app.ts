@@ -29,6 +29,8 @@ import garageRoutes from './routes/garage';
 import publicRoutes from './routes/public';
 import metaRoutes from './routes/meta';
 import adminRoutes from './routes/admin';
+import { mygarageRoutes } from './mygarage';
+import { mgErrorHandler } from './mygarage/middleware/errorHandler';
 
 const app = express();
 
@@ -55,6 +57,12 @@ app.use(cookieParser());
 // and Express 5's read-only req.query made it a no-op anyway), no compression
 // (nginx gzips in front of the container).
 app.use(helmet());
+
+// MyGarage mounts before the shared limiter on purpose: it has its own limiters,
+// and mobile carriers put many phones behind one IP, so a shared per-IP cap would misfire.
+app.use('/api/mygarage', mygarageRoutes);
+// Body-parser errors on MyGarage paths skip the router above, so they need this too.
+app.use('/api/mygarage', mgErrorHandler);
 
 // 4. Rate Limiting (Protects server from 1M+ user spam)
 const limiter = rateLimit({

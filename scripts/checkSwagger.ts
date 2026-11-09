@@ -30,6 +30,7 @@ const mounts = [...appSrc.matchAll(/app\.use\('\/api\/([a-zA-Z-]+)',\s*([a-zA-Z]
   .map(m => ({ prefix: `/${m[1]}`, file: m[2].replace(/Routes$/, '') }));
 
 const fileFor = (name: string) => {
+  if (name === 'mygarage') return path.join(__dirname, '..', 'mygarage', 'routes', 'index.ts');
   const dir = path.join(__dirname, '..', 'routes');
   const candidates = [name, name.replace(/s$/, ''), `${name}s`, 'jobCards', 'users'];
   for (const c of candidates) {

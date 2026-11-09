@@ -8,6 +8,8 @@ import { initSms } from './services/smsService';
 import { and, count, eq } from 'drizzle-orm';
 import { db } from './config/db';
 import { admins } from './models/Admin';
+import { connectMyGarage } from './mygarage';
+import { loadMyGarageEnv } from './mygarage/config/env';
 
 const log = logger.child('Server');
 
@@ -44,12 +46,26 @@ const PORT = process.env.PORT || 5000;
 // Mongoose, nothing buffers queries until a connection appears. `connectDB`
 // also applies pending schema migrations, so a boot that cannot migrate never
 // starts serving.
+// MyGarage never exits the process and never delays GaragePulse: it connects in
+// the background, and its router answers 503 until it is ready.
+const MYGARAGE_RETRY_MS = 60_000;
+
+function startMyGarage(): void {
+  void connectMyGarage().then(ready => {
+    log.info(ready ? 'MyGarage is on' : 'MyGarage is off');
+    // A valid environment with a failed connection is usually a database that is still waking up.
+    if (!ready && loadMyGarageEnv() !== null) setTimeout(startMyGarage, MYGARAGE_RETRY_MS).unref();
+  });
+}
+
 connectDB().then(() => app.listen(PORT, () => {
   log.info('GaragePulse API Server started', {
     mode: process.env.NODE_ENV,
     port: PORT,
     url: `http://localhost:${PORT}`
   });
+
+  startMyGarage();
 
   // Diagnostic only — must never take the server down with it.
   checkAdminSetup().catch(err =>

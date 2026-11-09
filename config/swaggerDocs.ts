@@ -28,6 +28,8 @@
  *     description: Public endpoints (no auth required)
  *   - name: Meta
  *     description: Static reference data (no auth required)
+ *   - name: MyGarage
+ *     description: MyGarage app cloud sync (separate Google sign-in, not GaragePulse accounts)
  *   - name: Admin
  *     description: Platform super-admin console — cross-tenant, separate auth
  *   - name: Health
@@ -2383,6 +2385,327 @@
  *         description: Removed (or was not the caller's)
  *       400:
  *         description: Push token missing
+ */
+
+// --- MyGarage ---
+
+/**
+ * @swagger
+ * /mygarage/auth/google:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Sign in with a Google id token
+ *     description: Creates the user on first sign-in. The token must be for the MyGarage web client id.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [idToken]
+ *             properties:
+ *               idToken: { type: string }
+ *     responses:
+ *       200:
+ *         description: Signed in
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGarageSession'
+ *       400:
+ *         description: Body missing or not valid
+ *       401:
+ *         description: Google sign-in failed
+ *       429:
+ *         description: Too many attempts
+ * /mygarage/auth/refresh:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Swap a refresh token for a new session
+ *     description: Refresh tokens are single use. The old one stops working.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken: { type: string }
+ *     responses:
+ *       200:
+ *         description: New session
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGarageSession'
+ *       400:
+ *         description: Body missing or not valid
+ *       401:
+ *         description: Refresh token unknown, used or expired
+ *       429:
+ *         description: Too many attempts
+ * /mygarage/auth/sign-out:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Revoke a refresh token
+ *     description: Succeeds for any well-formed body, even if the token is unknown.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken: { type: string }
+ *     responses:
+ *       200:
+ *         description: Signed out
+ *       400:
+ *         description: Body missing or not valid
+ *       429:
+ *         description: Too many attempts
+ * /mygarage/me:
+ *   get:
+ *     tags: [MyGarage]
+ *     summary: The signed-in MyGarage user
+ *     security: [{ MyGarageBearer: [] }]
+ *     responses:
+ *       200:
+ *         description: The user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGarageUser'
+ *       401:
+ *         description: Session ended
+ * /mygarage/account:
+ *   delete:
+ *     tags: [MyGarage]
+ *     summary: Delete the signed-in MyGarage account
+ *     description: Removes every stored file from cloud storage, then the account and all its synced data. Safe to retry after a 502.
+ *     security: [{ MyGarageBearer: [] }]
+ *     responses:
+ *       200:
+ *         description: Account deleted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: Account deleted }
+ *       401:
+ *         description: Session ended
+ *       502:
+ *         description: A file could not be removed; nothing else was deleted, try again
+ * /mygarage/key:
+ *   get:
+ *     tags: [MyGarage]
+ *     summary: The user data key
+ *     description: 32 random bytes, base64. The phone encrypts its records with it. Stable for the life of the account.
+ *     security: [{ MyGarageBearer: [] }]
+ *     responses:
+ *       200:
+ *         description: The key
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     key: { type: string, description: base64 of 32 bytes }
+ *       401:
+ *         description: Session ended
+ * /mygarage/sync/push:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Push changed records
+ *     description: Last write wins on updatedAt. An equal or older updatedAt is skipped.
+ *     security: [{ MyGarageBearer: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [changes]
+ *             properties:
+ *               changes:
+ *                 type: array
+ *                 maxItems: 200
+ *                 items:
+ *                   $ref: '#/components/schemas/MyGarageChange'
+ *     responses:
+ *       200:
+ *         description: Counts of stored and skipped changes
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     accepted: { type: integer }
+ *                     skipped: { type: integer }
+ *       400:
+ *         description: Data not in the expected format
+ *       401:
+ *         description: Session ended
+ *       413:
+ *         description: Body over 1 MB
+ * /mygarage/sync/pull:
+ *   get:
+ *     tags: [MyGarage]
+ *     summary: Pull changes after a position
+ *     security: [{ MyGarageBearer: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: since
+ *         schema: { type: integer, minimum: 0, default: 0 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 500, default: 500 }
+ *     responses:
+ *       200:
+ *         description: A page of changes in seq order
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGaragePull'
+ *       400:
+ *         description: since is not a non-negative integer
+ *       401:
+ *         description: Session ended
+ * /mygarage/files/{fileId}/upload-url:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Get a signed URL to upload an encrypted file
+ *     description: PUT the ciphertext to the returned URL, then call complete. Size is in ciphertext bytes. Limits are 25 MB per file and 1 GB per user.
+ *     security: [{ MyGarageBearer: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: fileId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [size]
+ *             properties:
+ *               size: { type: integer, minimum: 1, maximum: 26214400 }
+ *     responses:
+ *       200:
+ *         description: A signed upload URL
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGarageFileUrl'
+ *       400:
+ *         description: fileId is not a UUID or size is not valid
+ *       401:
+ *         description: Session ended
+ *       413:
+ *         description: File over 25 MB, or the cloud storage quota is full
+ *       502:
+ *         description: File storage is unavailable
+ * /mygarage/files/{fileId}/complete:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Confirm an upload finished
+ *     description: Checks the object in storage and records its real size.
+ *     security: [{ MyGarageBearer: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: fileId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: The stored size in bytes
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     size: { type: integer }
+ *       400:
+ *         description: fileId is not a UUID
+ *       401:
+ *         description: Session ended
+ *       404:
+ *         description: No upload was requested for this file
+ *       409:
+ *         description: The object is not in storage yet
+ *       413:
+ *         description: The uploaded object is over 25 MB and was removed
+ *       502:
+ *         description: File storage is unavailable
+ * /mygarage/files/{fileId}/download-url:
+ *   get:
+ *     tags: [MyGarage]
+ *     summary: Get a signed URL to download an encrypted file
+ *     security: [{ MyGarageBearer: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: fileId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: A signed download URL
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   $ref: '#/components/schemas/MyGarageFileUrl'
+ *       400:
+ *         description: fileId is not a UUID
+ *       401:
+ *         description: Session ended
+ *       404:
+ *         description: The file is not in the cloud yet, or belongs to someone else
+ *       502:
+ *         description: File storage is unavailable
  */
 
 export {};
