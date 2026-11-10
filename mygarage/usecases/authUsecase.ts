@@ -3,7 +3,8 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { getMyGarageEnv } from '../config/env';
 import { users, refreshTokens, toApi } from '../models/User';
-import { cloudFiles, syncRecords } from '../config/schema';
+import { cloudFiles, sharedGarages, syncRecords } from '../config/schema';
+import { deleteSharedGarage } from './garageUsecase';
 import { deleteObject, objectKey } from '../services/r2';
 import { verifyGoogleIdToken } from '../services/google';
 import { newDataKey, wrapKey, unwrapKey, newRefreshToken, hashToken } from '../services/crypto';
@@ -90,6 +91,8 @@ export const getDataKey = async ({ userId }: { userId: string }): Promise<string
 
 /** Removes every R2 object first, then the user; cascades take the rest. A failure leaves the user in place so a retry finishes the job. */
 export const deleteAccount = async ({ userId }: { userId: string }): Promise<void> => {
+  const owned = await mgDb.select({ id: sharedGarages.id }).from(sharedGarages).where(eq(sharedGarages.ownerId, userId));
+  for (const { id } of owned) await deleteSharedGarage({ garageId: id });
   const files = await mgDb.select({ scope: cloudFiles.scope, fileId: cloudFiles.fileId }).from(cloudFiles).where(eq(cloudFiles.ownerId, userId));
   for (let i = 0; i < files.length; i += R2_DELETE_CHUNK) {
     const chunk = files.slice(i, i + R2_DELETE_CHUNK);

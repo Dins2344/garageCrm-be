@@ -28,7 +28,7 @@ const storage = async <T>(userId: string, fileId: string, call: () => Promise<T>
 };
 
 /** Whose quota a scope's files count against: the user for personal scope, the garage owner for a garage. */
-const ownerOf = async (scope: string, userId: string): Promise<string> => {
+export const ownerOf = async (scope: string, userId: string): Promise<string> => {
   const garageId = garageIdOf(scope);
   if (!garageId) return userId;
   const [garage] = await mgDb.select({ ownerId: sharedGarages.ownerId }).from(sharedGarages).where(eq(sharedGarages.id, garageId));

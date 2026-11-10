@@ -3,6 +3,7 @@ import { isMyGarageReady } from '../config/db';
 import * as auth from '../controllers/authController';
 import * as sync from '../controllers/syncController';
 import * as files from '../controllers/fileController';
+import * as garages from '../controllers/garageController';
 import { requireUser } from '../middleware/auth';
 import { authLimiter, authSessionLimiter, userLimiter } from '../middleware/rateLimit';
 import { mgErrorHandler } from '../middleware/errorHandler';
@@ -36,6 +37,13 @@ router.get('/sync/pull', sync.pull);
 router.post('/files/:fileId/upload-url', files.uploadUrl);
 router.post('/files/:fileId/complete', files.complete);
 router.get('/files/:fileId/download-url', files.downloadUrl);
+router.get('/v2/garages', garages.list);
+router.post('/v2/garages/:garageId/share', garages.share);
+router.get('/v2/garages/:garageId/key', garages.key);
+router.get('/v2/garages/:garageId/people', garages.people);
+router.patch('/v2/garages/:garageId/members/:memberId', garages.setRole);
+router.delete('/v2/garages/:garageId/members/:memberId', garages.removeMember);
+router.delete('/v2/garages/:garageId', garages.remove);
 
 router.use(mgErrorHandler);
 
