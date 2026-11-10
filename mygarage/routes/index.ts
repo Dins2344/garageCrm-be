@@ -17,6 +17,9 @@ router.use((_req, res, next) => {
   next();
 });
 
+// Needs no database, so it answers even while sync is unavailable.
+router.get('/invite/:token', invites.linkPage);
+
 router.use((_req, res, next) => {
   if (!isMyGarageReady()) {
     res.status(503).json({ success: false, message: 'Sync is unavailable right now. Try again later.' });
@@ -28,7 +31,6 @@ router.use((_req, res, next) => {
 router.post('/auth/google', authLimiter, auth.google);
 router.post('/auth/refresh', authSessionLimiter, auth.refresh);
 router.post('/auth/sign-out', authSessionLimiter, auth.signOut);
-router.get('/invite/:token', invites.linkPage);
 
 // Everything below needs a signed-in user.
 router.use(requireUser, userLimiter);

@@ -120,7 +120,7 @@ describe('MyGarage release', () => {
       fileIds: [F[0], F[1]]
     });
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ released: 2, kept: 2 });
+    expect(res.body.data).toEqual({ released: 2, keptRecords: [{ tbl: 'vehicles', id: 'v2' }], keptFileIds: [F[1]] });
     expect((await testDb.select().from(syncRecords).where(eq(syncRecords.scope, u))).map((r) => r.id)).toEqual(['v2']);
     expect((await testDb.select().from(cloudFiles).where(eq(cloudFiles.scope, u))).map((r) => r.fileId)).toEqual([F[1]]);
     expect(await testDb.select().from(syncRecords).where(eq(syncRecords.scope, `g:${G}`))).toHaveLength(1);
@@ -136,8 +136,36 @@ describe('MyGarage release', () => {
     vi.mocked(r2.deleteObject).mockRejectedValueOnce(new Error('r2 down'));
     const res = await call('post', `/v2/garages/${G}/release`, a.accessToken, { records: [], fileIds: [F[0]] });
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ released: 0, kept: 1 });
+    expect(res.body.data).toEqual({ released: 0, keptRecords: [], keptFileIds: [F[0]] });
     expect(await testDb.select().from(cloudFiles).where(eq(cloudFiles.scope, u))).toHaveLength(1);
+    const retry = await call('post', `/v2/garages/${G}/release`, a.accessToken, { records: [], fileIds: [F[0]] });
+    expect(retry.body.data).toEqual({ released: 1, keptRecords: [], keptFileIds: [] });
+    expect(await testDb.select().from(cloudFiles).where(eq(cloudFiles.scope, u))).toHaveLength(0);
+  });
+
+  it('a newer personal copy is kept and listed; an older one is released', async () => {
+    const { a } = await setup();
+    const u = `u:${a.user.id}`;
+    await testDb.insert(syncRecords).values([
+      { ...rec(u, a.user.id, 'v1'), updatedAt: 5 }, rec(u, a.user.id, 'v2'),
+      rec(`g:${G}`, a.user.id, 'v1'), rec(`g:${G}`, a.user.id, 'v2')
+    ]);
+    const res = await call('post', `/v2/garages/${G}/release`, a.accessToken, { records: [{ tbl: 'vehicles', id: 'v1' }, { tbl: 'vehicles', id: 'v2' }], fileIds: [] });
+    expect(res.body.data).toEqual({ released: 1, keptRecords: [{ tbl: 'vehicles', id: 'v1' }], keptFileIds: [] });
+    expect((await testDb.select().from(syncRecords).where(eq(syncRecords.scope, u))).map((r) => r.id)).toEqual(['v1']);
+  });
+
+  it('releasing again after success reports everything released and nothing kept', async () => {
+    const { a } = await setup();
+    const u = `u:${a.user.id}`;
+    await testDb.insert(syncRecords).values([rec(u, a.user.id, 'v1'), rec(`g:${G}`, a.user.id, 'v1')]);
+    await uploaded(u, a.user.id, F[0]);
+    await uploaded(`g:${G}`, a.user.id, F[0]);
+    const body = { records: [{ tbl: 'vehicles', id: 'v1' }], fileIds: [F[0]] };
+    const first = await call('post', `/v2/garages/${G}/release`, a.accessToken, body);
+    const again = await call('post', `/v2/garages/${G}/release`, a.accessToken, body);
+    expect(first.body.data).toEqual({ released: 2, keptRecords: [], keptFileIds: [] });
+    expect(again.body.data).toEqual({ released: 2, keptRecords: [], keptFileIds: [] });
   });
 
   it("another user's personal rows and files with the same ids survive the owner's release", async () => {
@@ -149,7 +177,7 @@ describe('MyGarage release', () => {
     await uploaded(theirs, b.user.id, F[0]);
     await uploaded(`g:${G}`, a.user.id, F[0]);
     const res = await call('post', `/v2/garages/${G}/release`, a.accessToken, { records: [{ tbl: 'vehicles', id: 'v1' }], fileIds: [F[0]] });
-    expect(res.body.data).toEqual({ released: 2, kept: 0 });
+    expect(res.body.data).toEqual({ released: 2, keptRecords: [], keptFileIds: [] });
     expect(await testDb.select().from(syncRecords).where(eq(syncRecords.scope, theirs))).toHaveLength(1);
     expect(await testDb.select().from(cloudFiles).where(eq(cloudFiles.scope, theirs))).toHaveLength(1);
     expect(await testDb.select().from(syncRecords).where(eq(syncRecords.scope, mine))).toHaveLength(0);

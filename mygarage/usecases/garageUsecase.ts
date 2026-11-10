@@ -62,6 +62,7 @@ export const listGarages = async ({ userId }: { userId: string }): Promise<{ gar
 export const garageKey = async ({ userId, garageId }: { userId: string; garageId: string }): Promise<string> => {
   await requireMember(userId, garageId);
   const [garage] = await mgDb.select({ wrappedKey: sharedGarages.wrappedKey }).from(sharedGarages).where(eq(sharedGarages.id, garageId));
+  if (!garage) throw new HttpError(NO_ACCESS, 403); // deleted since the membership check
   return keyOf(garage.wrappedKey);
 };
 
@@ -125,37 +126,59 @@ export const deleteGarage = async ({ userId, garageId }: { userId: string; garag
   await deleteSharedGarage({ garageId });
 };
 
-/** After converting to a shared garage: drop the owner's personal copies that now exist in the garage. */
+/**
+ * After converting to a shared garage: drop the owner's personal copies that now exist in the garage.
+ * A copy that is gone already counts as released, so a retry with the same lists is safe. A personal row
+ * newer than the garage copy is kept, and everything kept is listed so the app retries exactly those.
+ */
 export const releasePersonal = async ({ userId, garageId, records, fileIds }: {
   userId: string; garageId: string; records: { tbl: string; id: string }[]; fileIds: string[];
-}): Promise<{ released: number; kept: number }> => {
+}): Promise<{ released: number; keptRecords: { tbl: string; id: string }[]; keptFileIds: string[] }> => {
   await requireOwner(userId, garageId);
   const mine = personalScope(userId);
   const theirs = garageScope(garageId);
+  const keptRecords: { tbl: string; id: string }[] = [];
+  const keptFileIds: string[] = [];
   let released = 0;
-  const byTable = new Map<string, string[]>();
-  for (const { tbl, id } of records) byTable.set(tbl, [...(byTable.get(tbl) ?? []), id]);
-  for (const [tbl, ids] of byTable) {
-    const inGarage = (await mgDb.select({ id: syncRecords.id }).from(syncRecords)
-      .where(and(eq(syncRecords.scope, theirs), eq(syncRecords.tbl, tbl), inArray(syncRecords.id, ids)))).map((r) => r.id);
-    if (!inGarage.length) continue;
-    released += (await mgDb.delete(syncRecords)
-      .where(and(eq(syncRecords.scope, mine), eq(syncRecords.tbl, tbl), inArray(syncRecords.id, inGarage))).returning({ id: syncRecords.id })).length;
+  const byTable = new Map<string, Set<string>>();
+  for (const { tbl, id } of records) byTable.set(tbl, (byTable.get(tbl) ?? new Set()).add(id));
+  for (const [tbl, idSet] of byTable) {
+    const ids = [...idSet];
+    const at = async (scope: string) => new Map((await mgDb.select({ id: syncRecords.id, updatedAt: syncRecords.updatedAt }).from(syncRecords)
+      .where(and(eq(syncRecords.scope, scope), eq(syncRecords.tbl, tbl), inArray(syncRecords.id, ids)))).map((r) => [r.id, r.updatedAt]));
+    const own = await at(mine);
+    const garage = await at(theirs);
+    const drop: string[] = [];
+    for (const id of ids) {
+      const ownAt = own.get(id);
+      const garageAt = garage.get(id);
+      if (ownAt === undefined) released++;
+      else if (garageAt !== undefined && garageAt >= ownAt) drop.push(id);
+      else keptRecords.push({ tbl, id });
+    }
+    if (drop.length) {
+      // Same guard in the delete, so a personal edit landing since the read is not lost.
+      const gone = (await mgDb.delete(syncRecords).where(and(eq(syncRecords.scope, mine), eq(syncRecords.tbl, tbl), inArray(syncRecords.id, drop),
+        sql`${syncRecords.updatedAt} <= (select g.updated_at from sync_records g where g.scope = ${theirs} and g.tbl = ${tbl} and g.id = ${syncRecords.id})`))
+        .returning({ id: syncRecords.id })).map((r) => r.id);
+      released += gone.length;
+      for (const id of drop) if (!gone.includes(id)) keptRecords.push({ tbl, id });
+    }
   }
-  const files = new Set(fileIds);
-  for (const fileId of files) {
-    const [copy] = await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles)
-      .where(and(eq(cloudFiles.scope, theirs), eq(cloudFiles.fileId, fileId), eq(cloudFiles.status, 'uploaded')));
-    if (!copy) continue;
+  for (const fileId of new Set(fileIds)) {
     const [own] = await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles)
       .where(and(eq(cloudFiles.scope, mine), eq(cloudFiles.fileId, fileId)));
-    if (!own) continue;
+    if (!own) { released++; continue; }
+    const [copy] = await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles)
+      .where(and(eq(cloudFiles.scope, theirs), eq(cloudFiles.fileId, fileId), eq(cloudFiles.status, 'uploaded')));
+    if (!copy) { keptFileIds.push(fileId); continue; }
     try {
       await removeCloudFile({ scope: mine, fileId });
       released++;
     } catch {
+      keptFileIds.push(fileId);
       log.error('Personal file release failed', { userId, garageId, fileId });
     }
   }
-  return { released, kept: new Set(records.map((r) => `${r.tbl}/${r.id}`)).size + files.size - released };
+  return { released, keptRecords, keptFileIds };
 };

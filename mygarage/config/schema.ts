@@ -1,6 +1,6 @@
 import { bigint, index, integer, pgSequence, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
-import { newId } from '../../utils/ids';
 import { sql } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 
 export const syncSeq = pgSequence('sync_seq');
 
@@ -54,7 +54,7 @@ export const garageMembers = pgTable('garage_members', {
 }, (t) => [primaryKey({ columns: [t.garageId, t.userId] }), index().on(t.userId)]);
 
 export const garageInvites = pgTable('garage_invites', {
-  id: text().primaryKey().$defaultFn(newId),
+  id: text().primaryKey().$defaultFn(randomUUID), // random, not newId(): an invite id must not be guessable
   garageId: text().notNull().references(() => sharedGarages.id, { onDelete: 'cascade' }),
   email: text().notNull(),
   role: text({ enum: ['editor', 'viewer'] }).notNull(),

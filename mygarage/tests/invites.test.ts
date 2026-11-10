@@ -6,12 +6,17 @@ import app from '../../app';
 import { authHeader } from '../../tests/helpers/factories';
 import { testDb, useMyGarageDb } from './harness';
 import { garageInvites, garageMembers } from '../config/schema';
+import { inviteStore } from '../middleware/rateLimit';
 import { hashToken } from '../services/crypto';
 import * as mailer from '../services/mailer';
+import logger from '../../utils/logger';
+import { setMyGarageEnv } from '../config/env';
+import { TEST_ENV } from './harness';
 
 const ACCOUNTS: Record<string, { sub: string; email: string; name?: string }> = {
   owner: { sub: 'g-1', email: 'owner@example.com', name: 'Dinson' },
   anu: { sub: 'g-2', email: 'anu@gmail.com' },
+  anuk: { sub: 'g-5', email: 'anuk@gmail.com' },
   bob: { sub: 'g-3', email: 'bob@example.com', name: 'Bob' }
 };
 vi.mock('../services/google', () => ({
@@ -248,5 +253,128 @@ describe('MyGarage invites', () => {
     const res = await invite(owner.accessToken, 'last@example.com');
     expect(res.status).toBe(429);
     expect(res.body.message).toMatch(/Too many/);
+  });
+
+  it('an expired invite does not block inviting the same address again', async () => {
+    const { owner } = await setup();
+    const first = await invite(owner.accessToken);
+    const at = new Date(first.body.data.expiresAt).getTime();
+    expect((await invite(owner.accessToken)).status).toBe(409);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at + 1000);
+    const fresh = await sign('owner'); // a fresh access token for the moved clock
+    expect((await invite(fresh.accessToken)).status).toBe(201);
+  });
+
+  it('accept, decline and cancel delete the invite row', async () => {
+    const { owner, anu, bob } = await setup();
+    const a = (await invite(owner.accessToken)).body.data.id;
+    const b = (await invite(owner.accessToken, 'bob@example.com')).body.data.id;
+    const c = (await invite(owner.accessToken, 'c@example.com')).body.data.id;
+    await call('post', `/invites/${a}/accept`, anu.accessToken);
+    await call('post', `/invites/${b}/decline`, bob.accessToken);
+    await call('delete', `/invites/${c}`, owner.accessToken);
+    expect(await testDb.select().from(garageInvites)).toHaveLength(0);
+    for (const id of [a, b, c]) {
+      const res = await call('post', `/invites/${id}/accept`, anu.accessToken);
+      expect([res.status, res.body.message]).toEqual([404, GONE]);
+    }
+  });
+
+  it('creating an invite purges invites expired more than 3 days ago, in any garage, and keeps newer ones', async () => {
+    const { owner } = await setup();
+    const id1 = (await invite(owner.accessToken, 'old@example.com')).body.data.id;
+    const id2 = (await invite(owner.accessToken, 'recent@example.com')).body.data.id;
+    await testDb.update(garageInvites).set({ expiresAt: new Date(Date.now() - 4 * 86400000) }).where(eq(garageInvites.id, id1));
+    await testDb.update(garageInvites).set({ expiresAt: new Date(Date.now() - 2 * 86400000) }).where(eq(garageInvites.id, id2));
+    expect((await invite(owner.accessToken, 'new@example.com')).status).toBe(201);
+    const ids = (await testDb.select().from(garageInvites)).map((r) => r.id);
+    expect(ids).not.toContain(id1);
+    expect(ids).toContain(id2);
+  });
+
+  it('within the 3 days the expired message still works', async () => {
+    const { owner, anu } = await setup();
+    const id = (await invite(owner.accessToken)).body.data.id;
+    await testDb.update(garageInvites).set({ expiresAt: new Date(Date.now() - 2 * 86400000) });
+    const res = await call('post', `/invites/${id}/accept`, anu.accessToken);
+    expect([res.status, res.body.message]).toEqual([410, 'This invite has expired. Ask Dinson to send a new one.']);
+  });
+
+  it('an invite to Anu.K+cars@googlemail.com is listed for and accepted by anuk@gmail.com; other domains compare exactly', async () => {
+    const { owner } = await setup();
+    const anuk = await sign('anuk');
+    const id = (await invite(owner.accessToken, 'Anu.K+cars@googlemail.com')).body.data.id;
+    expect((await invite(owner.accessToken, 'anuk@gmail.com')).status).toBe(409);
+    expect((await call('get', '/invites', anuk.accessToken)).body.data.invites).toHaveLength(1);
+    const ok = await call('post', `/invites/${id}/accept`, anuk.accessToken);
+    expect(ok.body.data).toEqual({ garageId: G, role: 'editor' });
+    expect((await invite(owner.accessToken, 'a.nu.k@gmail.com')).body.message).toBe('This person already has access.');
+
+    const ab = await sign('ab');
+    await invite(owner.accessToken, 'a.b@example.com');
+    expect((await call('get', '/invites', ab.accessToken)).body.data.invites).toEqual([]);
+  });
+
+  it('invite ids are random UUIDs', async () => {
+    const { owner } = await setup();
+    const id = (await invite(owner.accessToken)).body.data.id;
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it('one user gets 20 invite emails a day, then 429 with the daily message', async () => {
+    const { owner } = await setup();
+    for (let i = 0; i < 20; i++) {
+      expect((await invite(owner.accessToken, `p${i}@example.com`)).status).toBe(201);
+      if (i % 5 === 4) {
+        await testDb.delete(garageInvites);
+        await inviteStore.resetAll(); // the hourly limiter would trip first
+      }
+    }
+    const res = await invite(owner.accessToken, 'last@example.com');
+    expect([res.status, res.body.message]).toEqual([429, 'Too many invites today. Try again tomorrow.']);
+    expect(sent()).toHaveLength(20);
+  });
+
+  it('the whole server sends at most 100 invite emails a day, then 503', async () => {
+    for (let o = 0; o < 5; o++) {
+      const owner = await sign(`own${o}`);
+      const gid = `0190a1b2-c3d4-7e5f-8a6b-1234567890b${o}`;
+      await call('post', `/garages/${gid}/share`, owner.accessToken);
+      for (let i = 0; i < 20; i++) {
+        const res = await call('post', `/garages/${gid}/invites`, owner.accessToken).send({ email: `x${o}-${i}@example.com`, role: 'viewer', garageName: 'G' });
+        expect(res.status).toBe(201);
+        if (i % 5 === 4) await testDb.delete(garageInvites);
+      }
+    }
+    const late = await sign('own9');
+    await call('post', `/garages/${G}/share`, late.accessToken);
+    const res = await invite(late.accessToken, 'z@example.com');
+    expect([res.status, res.body.message]).toEqual([503, 'Inviting is unavailable right now. Try again later.']);
+    expect(sent()).toHaveLength(100);
+  }, 60000);
+
+  it('a failed send logs the SMTP codes and ids, never the address or message text', async () => {
+    const { owner } = await setup();
+    vi.mocked(mailer.sendInviteMail).mockRejectedValue(Object.assign(new Error('rejected anu@gmail.com'), { code: 'EAUTH', responseCode: 535 }));
+    const spy = vi.spyOn(logger, 'write');
+    const res = await invite(owner.accessToken);
+    const logged = JSON.stringify(spy.mock.calls);
+    spy.mockRestore();
+    expect(res.status).toBe(502);
+    expect(logged).toContain('EAUTH');
+    expect(logged).toContain('535');
+    expect(logged).not.toContain('anu@gmail');
+  });
+
+  it('the link page answers while MyGarage is not ready, and the rest still gets 503', async () => {
+    setMyGarageEnv(null);
+    try {
+      const page = await request(app).get(`/api/mygarage/invite/${'A'.repeat(43)}`);
+      expect([page.status, page.headers['cache-control']]).toEqual([200, 'no-store']);
+      expect((await request(app).get(`${BASE}/invites`)).status).toBe(503);
+    } finally {
+      setMyGarageEnv(TEST_ENV);
+    }
   });
 });

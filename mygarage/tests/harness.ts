@@ -5,6 +5,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import * as schema from '../config/schema';
 import { setMgDb, MG_MIGRATIONS_FOLDER, MgDb } from '../config/db';
 import { setMyGarageEnv, MyGarageEnv } from '../config/env';
+import { resetMailCaps } from '../usecases/inviteUsecase';
 import { authStore, authSessionStore, userStore, inviteStore } from '../middleware/rateLimit';
 
 export const TEST_ENV: MyGarageEnv = {
@@ -36,6 +37,7 @@ export const useMyGarageDb = (): void => {
     await authSessionStore.resetAll();
     await userStore.resetAll();
     await inviteStore.resetAll();
+    resetMailCaps();
     await pglite.exec('TRUNCATE TABLE users, refresh_tokens, sync_records, cloud_files, shared_garages, garage_members, garage_invites CASCADE');
   });
 

@@ -37,6 +37,6 @@ export const sendInviteMail = async (mail: InviteMail): Promise<void> => {
     to: mail.to,
     subject: `${mail.inviterName} invited you to ${mail.garageName} on MyGarage`,
     text: `${intro(mail.inviterName, mail.garageName)}\n\nOpen the invite on your Android phone:\n${mail.link}\n\n${tail(mail.to)}`,
-    html: `<p>${e(intro(mail.inviterName, mail.garageName))}</p><p>Open the invite on your Android phone:<br><a href="${e(mail.link)}">${e(mail.link)}</a></p><p>${e(tail(mail.to))}</p>`
+    html: `<p>${e(intro(mail.inviterName, mail.garageName))}</p><p>Open the invite on your Android phone:</p><p><a href="${e(mail.link)}" style="display:inline-block;padding:12px 22px;border-radius:10px;background:#027F86;color:#ffffff;text-decoration:none;font-weight:600">Open in MyGarage</a></p><p>${e(mail.link)}</p><p>${e(tail(mail.to))}</p>`
   });
 };
