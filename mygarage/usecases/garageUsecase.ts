@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { getMyGarageEnv } from '../config/env';
 import { cloudFiles, garageInvites, garageMembers, sharedGarages, syncRecords, users } from '../config/schema';
@@ -71,7 +71,7 @@ export const listPeople = async ({ userId, garageId }: { userId: string; garageI
     .from(garageMembers).innerJoin(users, eq(users.id, garageMembers.userId))
     .where(eq(garageMembers.garageId, garageId));
   const invites = await mgDb.select({ id: garageInvites.id, email: garageInvites.email, role: garageInvites.role, expiresAt: garageInvites.expiresAt })
-    .from(garageInvites).where(and(eq(garageInvites.garageId, garageId), eq(garageInvites.status, 'pending')));
+    .from(garageInvites).where(and(eq(garageInvites.garageId, garageId), eq(garageInvites.status, 'pending'), gt(garageInvites.expiresAt, new Date())));
   return { members, invites };
 };
 
