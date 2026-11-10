@@ -3,10 +3,12 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { getMyGarageEnv } from '../config/env';
 import { users, refreshTokens, toApi } from '../models/User';
-import { cloudFiles } from '../config/schema';
+import { cloudFiles, sharedGarages, syncRecords } from '../config/schema';
+import { deleteSharedGarage } from './garageUsecase';
 import { deleteObject, objectKey } from '../services/r2';
 import { verifyGoogleIdToken } from '../services/google';
 import { newDataKey, wrapKey, unwrapKey, newRefreshToken, hashToken } from '../services/crypto';
+import { personalScope } from '../services/scope';
 import { newId } from '../../utils/ids';
 import { HttpError } from '../../utils/httpError';
 import logger from '../../utils/logger';
@@ -34,14 +36,14 @@ const issueSession = async (tx: Pick<typeof mgDb, 'insert'>, user: { id: string;
 
 export const signInWithGoogle = async ({ idToken }: { idToken: string }): Promise<Session> => {
   const env = getMyGarageEnv();
-  const { sub, email } = await verifyGoogleIdToken(idToken, env.googleWebClientId);
+  const { sub, email, name } = await verifyGoogleIdToken(idToken, env.googleWebClientId);
   // A second device signing in at the same moment must not fail on the unique googleSub.
   await mgDb.insert(users)
-    .values({ id: newId(), googleSub: sub, email, wrappedKey: wrapKey(newDataKey(), env.masterKey) })
+    .values({ id: newId(), googleSub: sub, email, name, wrappedKey: wrapKey(newDataKey(), env.masterKey) })
     .onConflictDoNothing({ target: users.googleSub });
   let [user] = await mgDb.select().from(users).where(eq(users.googleSub, sub)).limit(1);
-  if (user.email !== email) {
-    [user] = await mgDb.update(users).set({ email }).where(eq(users.id, user.id)).returning();
+  if (user.email !== email || user.name !== name) {
+    [user] = await mgDb.update(users).set({ email, name }).where(eq(users.id, user.id)).returning();
   }
   const session = await issueSession(mgDb, user);
   log.info('Signed in', { userId: user.id });
@@ -89,18 +91,21 @@ export const getDataKey = async ({ userId }: { userId: string }): Promise<string
 
 /** Removes every R2 object first, then the user; cascades take the rest. A failure leaves the user in place so a retry finishes the job. */
 export const deleteAccount = async ({ userId }: { userId: string }): Promise<void> => {
-  const files = await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles).where(eq(cloudFiles.userId, userId));
+  const owned = await mgDb.select({ id: sharedGarages.id }).from(sharedGarages).where(eq(sharedGarages.ownerId, userId));
+  for (const { id } of owned) await deleteSharedGarage({ garageId: id });
+  const files = await mgDb.select({ scope: cloudFiles.scope, fileId: cloudFiles.fileId }).from(cloudFiles).where(eq(cloudFiles.ownerId, userId));
   for (let i = 0; i < files.length; i += R2_DELETE_CHUNK) {
     const chunk = files.slice(i, i + R2_DELETE_CHUNK);
-    const results = await Promise.allSettled(chunk.map(({ fileId }) => deleteObject(objectKey(userId, fileId))));
+    const results = await Promise.allSettled(chunk.map(({ scope, fileId }) => deleteObject(objectKey(scope, fileId))));
     const gone = chunk.filter((_, n) => results[n].status === 'fulfilled').map((f) => f.fileId);
-    if (gone.length) await mgDb.delete(cloudFiles).where(and(eq(cloudFiles.userId, userId), inArray(cloudFiles.fileId, gone)));
+    if (gone.length) await mgDb.delete(cloudFiles).where(and(eq(cloudFiles.ownerId, userId), inArray(cloudFiles.fileId, gone)));
     if (gone.length < chunk.length) {
       const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
       log.error('Account deletion stopped at a file', { userId, files: files.length, errorName: (failed?.reason as Error | undefined)?.name });
       throw new HttpError('Could not delete your files. Try again.', 502);
     }
   }
+  await mgDb.delete(syncRecords).where(eq(syncRecords.scope, personalScope(userId)));
   await mgDb.delete(users).where(eq(users.id, userId));
   log.info('Account deleted', { userId, files: files.length });
 };

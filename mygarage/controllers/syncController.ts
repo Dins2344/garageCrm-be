@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as syncUsecase from '../usecases/syncUsecase';
-import { pushSchema, SYNC_BAD_INPUT, MAX_PULL } from '../models/SyncRecord';
+import { pushSchema, scopedPushSchema, pullSchema, SYNC_BAD_INPUT, MAX_PULL } from '../models/SyncRecord';
+import { personalScope } from '../services/scope';
 import { HttpError } from '../../utils/httpError';
 
 const first = (v: unknown): string | undefined => {
@@ -11,7 +12,7 @@ const first = (v: unknown): string | undefined => {
 export const push = async (req: Request, res: Response): Promise<void> => {
   const parsed = pushSchema.safeParse(req.body);
   if (!parsed.success) throw new HttpError(SYNC_BAD_INPUT, 400);
-  const { accepted, skipped } = await syncUsecase.pushChanges({ userId: res.locals.mgUserId, changes: parsed.data.changes });
+  const { accepted, skipped } = await syncUsecase.pushChanges({ userId: res.locals.mgUserId, scope: personalScope(res.locals.mgUserId), changes: parsed.data.changes });
   res.json({ success: true, data: { accepted: accepted.length, skipped } });
 };
 
@@ -22,5 +23,20 @@ export const pull = async (req: Request, res: Response): Promise<void> => {
   if (rawSince === '' || !Number.isSafeInteger(since) || since < 0) throw new HttpError(SYNC_BAD_INPUT, 400);
   const asked = rawLimit === undefined ? MAX_PULL : Math.trunc(Number(rawLimit));
   const limit = Number.isFinite(asked) ? Math.min(MAX_PULL, Math.max(1, asked)) : MAX_PULL;
-  res.json({ success: true, data: await syncUsecase.pullChanges({ userId: res.locals.mgUserId, since, limit }) });
+  res.json({ success: true, data: await syncUsecase.pullChanges({ scope: personalScope(res.locals.mgUserId), since, limit }) });
+};
+
+export const pushV2 = async (req: Request, res: Response): Promise<void> => {
+  const parsed = scopedPushSchema.safeParse(req.body);
+  if (!parsed.success) throw new HttpError(SYNC_BAD_INPUT, 400);
+  const { accepted, skipped, rejected } = await syncUsecase.pushScoped({ userId: res.locals.mgUserId, changes: parsed.data.changes });
+  res.json({ success: true, data: { accepted: accepted.length, skipped, rejected } });
+};
+
+export const pullV2 = async (req: Request, res: Response): Promise<void> => {
+  const parsed = pullSchema.safeParse(req.body);
+  if (!parsed.success) throw new HttpError(SYNC_BAD_INPUT, 400);
+  const asked = Math.trunc(parsed.data.limit ?? MAX_PULL);
+  const limit = Number.isFinite(asked) ? Math.min(MAX_PULL, Math.max(1, asked)) : MAX_PULL;
+  res.json({ success: true, data: await syncUsecase.pullScoped({ userId: res.locals.mgUserId, cursors: parsed.data.cursors, limit }) });
 };

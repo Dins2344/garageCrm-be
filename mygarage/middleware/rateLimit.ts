@@ -4,6 +4,7 @@ import { rateLimit, MemoryStore, ipKeyGenerator } from 'express-rate-limit';
 export const authStore = new MemoryStore();
 export const authSessionStore = new MemoryStore();
 export const userStore = new MemoryStore();
+export const inviteStore = new MemoryStore();
 
 const WINDOW_MS = 10 * 60 * 1000;
 
@@ -50,5 +51,16 @@ export const userLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { success: false, message: 'Too many requests. Try again in a few minutes.' },
+  keyGenerator: (_req, res) => res.locals.mgUserId as string
+});
+
+// Creating or resending an invite sends an email, so it is capped per user.
+export const inviteLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  store: inviteStore,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many invites sent. Try again later.' },
   keyGenerator: (_req, res) => res.locals.mgUserId as string
 });

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { syncRecords } from '../config/schema';
+import { isFileId } from '../services/ids';
 
 export { syncRecords };
 
@@ -18,3 +19,12 @@ export const changeSchema = z.object({
 });
 
 export const pushSchema = z.object({ changes: z.array(changeSchema).max(MAX_PUSH) });
+
+const wireScope = z.string().refine((s) => s === 'personal' || isFileId(s));
+
+export const scopedChangeSchema = changeSchema.extend({ scope: wireScope });
+export const scopedPushSchema = z.object({ changes: z.array(scopedChangeSchema).max(MAX_PUSH) });
+export const pullSchema = z.object({
+  cursors: z.record(wireScope, z.number().int().min(0)).refine((c) => Object.keys(c).length <= 50),
+  limit: z.number().optional()
+});

@@ -13,7 +13,7 @@ vi.mock('../services/google', () => ({
     idToken === 'other' ? { sub: 'g-2', email: 'b@example.com' } : { sub: 'g-1', email: 'a@example.com' })
 }));
 vi.mock('../services/r2', () => ({
-  objectKey: (userId: string, fileId: string) => `u/${userId}/${fileId}`,
+  objectKey: (scope: string, fileId: string) => `${scope[0]}/${scope.slice(2)}/${fileId}`,
   presignPut: vi.fn(async (key: string) => 'https://r2.test/' + key),
   presignGet: vi.fn(async (key: string) => 'https://r2.test/' + key),
   headObjectSize: vi.fn(async () => null),
@@ -34,7 +34,7 @@ const complete = (t: string, fileId: string) =>
 const download = (t: string, fileId: string) =>
   request(app).get(`/api/mygarage/files/${fileId}/download-url`).set(authHeader(t));
 const row = async (userId: string, fileId: string) =>
-  (await mgDb.select().from(cloudFiles).where(and(eq(cloudFiles.userId, userId), eq(cloudFiles.fileId, fileId))))[0];
+  (await mgDb.select().from(cloudFiles).where(and(eq(cloudFiles.ownerId, userId), eq(cloudFiles.fileId, fileId))))[0];
 
 beforeEach(() => {
   vi.mocked(r2.headObjectSize).mockReset().mockResolvedValue(null);
@@ -76,7 +76,8 @@ describe('MyGarage files', () => {
     const s = await sign();
     // 40 files of 25 MB = 1000 MB stored.
     const seeded = Array.from({ length: 40 }, (_, i) => ({
-      userId: s.user.id,
+      scope: `u:${s.user.id}`,
+      ownerId: s.user.id,
       fileId: `0190a1b2-c3d4-7e5f-8a6b-1000000000${String(i).padStart(2, '0')}`,
       size: 25 * MB,
       status: 'uploaded' as const
@@ -183,7 +184,7 @@ describe('MyGarage files', () => {
 
   it('a leftover row for a deleted file stops counting toward the quota', async () => {
     const s = await sign();
-    await mgDb.insert(cloudFiles).values({ userId: s.user.id, fileId: F2, size: 1024 * MB, status: 'uploaded' });
+    await mgDb.insert(cloudFiles).values({ scope: `u:${s.user.id}`, ownerId: s.user.id, fileId: F2, size: 1024 * MB, status: 'uploaded' });
     expect((await upload(s.accessToken, F1, 100)).status).toBe(413);
     vi.mocked(r2.deleteObject).mockRejectedValueOnce(new Error('boom'));
     await pushFile(s.accessToken, F2, 11, 11); // delete fails, row stays
@@ -195,7 +196,7 @@ describe('MyGarage files', () => {
 
   it('a push for the same user completes while the upload sweep waits on R2', async () => {
     const s = await sign();
-    await mgDb.insert(cloudFiles).values({ userId: s.user.id, fileId: F2, size: 100, status: 'uploaded' });
+    await mgDb.insert(cloudFiles).values({ scope: `u:${s.user.id}`, ownerId: s.user.id, fileId: F2, size: 100, status: 'uploaded' });
     vi.mocked(r2.deleteObject).mockRejectedValueOnce(new Error('boom'));
     await pushFile(s.accessToken, F2, 11, 11); // delete fails, row stays for the sweep
     let release!: () => void;
@@ -221,7 +222,8 @@ describe('MyGarage files', () => {
   it('complete deletes the object and the row when the total would pass 1 GB', async () => {
     const s = await sign();
     const seeded = Array.from({ length: 40 }, (_, i) => ({
-      userId: s.user.id,
+      scope: `u:${s.user.id}`,
+      ownerId: s.user.id,
       fileId: `0190a1b2-c3d4-7e5f-8a6b-1000000000${String(i).padStart(2, '0')}`,
       size: 25 * MB,
       status: 'uploaded' as const
