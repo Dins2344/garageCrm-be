@@ -5,7 +5,12 @@ import app from '../../app';
 import { authHeader } from '../../tests/helpers/factories';
 import { testDb, useMyGarageDb } from './harness';
 import { garageMembers, syncRecords } from '../config/schema';
+import { roleIn } from '../usecases/garageUsecase';
 
+vi.mock('../usecases/garageUsecase', async (orig) => {
+  const m = await orig<typeof import('../usecases/garageUsecase')>();
+  return { ...m, roleIn: vi.fn(m.roleIn) };
+});
 vi.mock('../services/google', () => ({
   verifyGoogleIdToken: vi.fn(async (idToken: string) =>
     idToken === 'b' ? { sub: 'g-2', email: 'b@example.com' }
@@ -47,6 +52,16 @@ const stored = async () => testDb.select().from(syncRecords);
 const ids = (res: { body: { data: { changes: { id: string }[] } } }) => res.body.data.changes.map((c) => c.id);
 
 describe('MyGarage scoped sync', () => {
+  it('a push that passed its role check but lost access before the scope lock is rejected and stores nothing', async () => {
+    const { d } = await setup();
+    // First roleIn call is the pre-check: pretend d was still an editor. The in-lock check sees the truth (no membership).
+    vi.mocked(roleIn).mockImplementationOnce(async () => 'editor');
+    const res = await push(d.accessToken, [ch(G, 'v1')]);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ accepted: 0, skipped: 0, rejected: [{ scope: G, tbl: 'vehicles', id: 'v1' }] });
+    expect((await stored()).filter((r) => r.scope === `g:${G}`)).toEqual([]);
+  });
+
   it('owner and editor push to G; every member pulls them with scope G', async () => {
     const { a, b, c } = await setup();
     expect((await push(a.accessToken, [ch(G, 'v1')])).body.data).toEqual({ accepted: 1, skipped: 0, rejected: [] });

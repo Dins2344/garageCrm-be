@@ -128,6 +128,35 @@ describe('MyGarage release', () => {
     expect(r2.deleteObject).toHaveBeenCalledWith(`u/${a.user.id}/${F[0]}`);
   });
 
+  it('an R2 failure keeps the personal file row and counts it as kept', async () => {
+    const { a } = await setup();
+    const u = `u:${a.user.id}`;
+    await uploaded(u, a.user.id, F[0]);
+    await uploaded(`g:${G}`, a.user.id, F[0]);
+    vi.mocked(r2.deleteObject).mockRejectedValueOnce(new Error('r2 down'));
+    const res = await call('post', `/v2/garages/${G}/release`, a.accessToken, { records: [], fileIds: [F[0]] });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ released: 0, kept: 1 });
+    expect(await testDb.select().from(cloudFiles).where(eq(cloudFiles.scope, u))).toHaveLength(1);
+  });
+
+  it("another user's personal rows and files with the same ids survive the owner's release", async () => {
+    const { a, b } = await setup();
+    const mine = `u:${a.user.id}`;
+    const theirs = `u:${b.user.id}`;
+    await testDb.insert(syncRecords).values([rec(mine, a.user.id, 'v1'), rec(theirs, b.user.id, 'v1'), rec(`g:${G}`, a.user.id, 'v1')]);
+    await uploaded(mine, a.user.id, F[0]);
+    await uploaded(theirs, b.user.id, F[0]);
+    await uploaded(`g:${G}`, a.user.id, F[0]);
+    const res = await call('post', `/v2/garages/${G}/release`, a.accessToken, { records: [{ tbl: 'vehicles', id: 'v1' }], fileIds: [F[0]] });
+    expect(res.body.data).toEqual({ released: 2, kept: 0 });
+    expect(await testDb.select().from(syncRecords).where(eq(syncRecords.scope, theirs))).toHaveLength(1);
+    expect(await testDb.select().from(cloudFiles).where(eq(cloudFiles.scope, theirs))).toHaveLength(1);
+    expect(await testDb.select().from(syncRecords).where(eq(syncRecords.scope, mine))).toHaveLength(0);
+    expect(r2.deleteObject).toHaveBeenCalledTimes(1);
+    expect(r2.deleteObject).toHaveBeenCalledWith(`u/${a.user.id}/${F[0]}`);
+  });
+
   it('release is owner only and validates the body', async () => {
     const { a, b, d } = await setup();
     const body = { records: [], fileIds: [] };

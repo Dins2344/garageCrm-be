@@ -3,7 +3,7 @@ import { mgDb } from '../config/db';
 import { syncRecords } from '../models/SyncRecord';
 import { removeCloudFile } from './fileUsecase';
 import { isFileId } from '../services/ids';
-import { personalScope, garageScope, toWire, WIRE_PERSONAL } from '../services/scope';
+import { personalScope, garageScope, garageIdOf, toWire, WIRE_PERSONAL } from '../services/scope';
 import { roleIn, readableGarageIds, Role } from './garageUsecase';
 import logger from '../../utils/logger';
 
@@ -13,8 +13,16 @@ export type Change = { tbl: string; id: string; updatedAt: number; deletedAt: nu
 
 type Rejected = { scope: string; tbl: string; id: string };
 
-/** Last write wins on updatedAt, one transaction for all groups. Returns the rows stored per scope, so callers can act on them. */
-const storeGroups = async (userId: string, groups: Map<string, Change[]>): Promise<Map<string, Change[]>> => {
+/** Owner or editor may write; only the owner may touch the garage's own `garages` row. */
+const mayWrite = (role: Role | null, garageId: string, change: Change): boolean =>
+  (role === 'owner' || role === 'editor') && (change.tbl !== 'garages' || (change.id === garageId && role === 'owner'));
+
+/**
+ * Last write wins on updatedAt, one transaction for all groups. Returns the rows stored per scope, so callers can act on them.
+ * With `recheck`, garage scopes are re-checked once their lock is held (a garage delete or member removal may have committed
+ * since the caller's own check); changes that now fail go to `late` and are not stored.
+ */
+const storeGroups = async (userId: string, groups: Map<string, Change[]>, recheck?: Rejected[]): Promise<Map<string, Change[]>> => {
   const stored = await mgDb.transaction(async (tx) => {
     const out = new Map<string, Change[]>();
     // Sorted lock order, so two pushes touching the same scopes cannot deadlock.
@@ -23,7 +31,13 @@ const storeGroups = async (userId: string, groups: Map<string, Change[]>): Promi
       // otherwise a pull can read a higher seq first and skip a row that commits later.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${scope}))`);
       const done: Change[] = [];
+      const garageId = garageIdOf(scope);
+      const role = recheck && garageId ? await roleIn(userId, garageId, tx) : null;
       for (const change of groups.get(scope) ?? []) {
+        if (recheck && garageId && !mayWrite(role, garageId, change)) {
+          recheck.push({ scope: garageId, tbl: change.tbl, id: change.id });
+          continue;
+        }
         const [row] = await tx.insert(syncRecords)
           .values({ ...change, scope, writerId: userId })
           .onConflictDoUpdate({
@@ -77,8 +91,7 @@ export const pushScoped = async ({ userId, changes }: { userId: string; changes:
   let allowed = 0;
   for (const { scope, ...change } of changes) {
     const role = scope === WIRE_PERSONAL ? 'owner' : roles.get(scope);
-    const ok = scope === WIRE_PERSONAL
-      || ((role === 'owner' || role === 'editor') && (change.tbl !== 'garages' || (change.id === scope && role === 'owner')));
+    const ok = scope === WIRE_PERSONAL || mayWrite(role ?? null, scope, change);
     if (!ok) {
       rejected.push({ scope, tbl: change.tbl, id: change.id });
       continue;
@@ -87,9 +100,11 @@ export const pushScoped = async ({ userId, changes }: { userId: string; changes:
     const stored = scope === WIRE_PERSONAL ? personalScope(userId) : garageScope(scope);
     groups.set(stored, [...(groups.get(stored) ?? []), change]);
   }
-  const accepted = [...(await storeGroups(userId, groups)).values()].flat();
+  const late: Rejected[] = [];
+  const accepted = [...(await storeGroups(userId, groups, late)).values()].flat();
+  rejected.push(...late);
   log.info('Pushed scoped', { userId, accepted: accepted.length, rejected: rejected.length });
-  return { accepted, skipped: allowed - accepted.length, rejected };
+  return { accepted, skipped: allowed - late.length - accepted.length, rejected };
 };
 
 export const pullChanges = async ({ scope, since, limit }: { scope: string; since: number; limit: number }): Promise<{ changes: (Change & { seq: number })[]; next: number; more: boolean }> => {

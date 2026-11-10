@@ -15,8 +15,8 @@ const log = logger.child('MyGarageGarages');
 export type Role = 'owner' | 'editor' | 'viewer';
 const R2_DELETE_CHUNK = 10;
 
-export const roleIn = async (userId: string, garageId: string): Promise<Role | null> => {
-  const [row] = await mgDb.select({ role: garageMembers.role }).from(garageMembers)
+export const roleIn = async (userId: string, garageId: string, db: Pick<typeof mgDb, 'select'> = mgDb): Promise<Role | null> => {
+  const [row] = await db.select({ role: garageMembers.role }).from(garageMembers)
     .where(and(eq(garageMembers.garageId, garageId), eq(garageMembers.userId, userId)));
   return row?.role ?? null;
 };
@@ -157,5 +157,5 @@ export const releasePersonal = async ({ userId, garageId, records, fileIds }: {
       log.error('Personal file release failed', { userId, garageId, fileId });
     }
   }
-  return { released, kept: records.length + files.size - released };
+  return { released, kept: new Set(records.map((r) => `${r.tbl}/${r.id}`)).size + files.size - released };
 };
