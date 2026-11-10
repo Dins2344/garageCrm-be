@@ -10,17 +10,17 @@ const log = logger.child('MyGarageSync');
 export type Change = { tbl: string; id: string; updatedAt: number; deletedAt: number | null; payload: string };
 
 /** Last write wins on updatedAt. Returns the rows that were stored, so callers can act on them. */
-export const pushChanges = async ({ userId, changes }: { userId: string; changes: Change[] }): Promise<{ accepted: Change[]; skipped: number }> => {
+export const pushChanges = async ({ userId, scope, changes }: { userId: string; scope: string; changes: Change[] }): Promise<{ accepted: Change[]; skipped: number }> => {
   const accepted = await mgDb.transaction(async (tx) => {
     // One push per user at a time: commit order must match seq order,
     // otherwise a pull can read a higher seq first and skip a row that commits later.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}))`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${scope}))`);
     const stored: Change[] = [];
     for (const change of changes) {
       const [row] = await tx.insert(syncRecords)
-        .values({ ...change, userId })
+        .values({ ...change, scope, writerId: userId })
         .onConflictDoUpdate({
-          target: [syncRecords.userId, syncRecords.tbl, syncRecords.id],
+          target: [syncRecords.scope, syncRecords.tbl, syncRecords.id],
           set: {
             updatedAt: change.updatedAt,
             deletedAt: change.deletedAt,
@@ -43,7 +43,7 @@ export const pushChanges = async ({ userId, changes }: { userId: string; changes
       continue;
     }
     try {
-      await removeCloudFile({ userId, fileId: change.id });
+      await removeCloudFile({ userId, scope, fileId: change.id });
     } catch {
       log.error('Cloud file removal failed', { userId, fileId: change.id });
     }
@@ -52,7 +52,7 @@ export const pushChanges = async ({ userId, changes }: { userId: string; changes
   return { accepted, skipped: changes.length - accepted.length };
 };
 
-export const pullChanges = async ({ userId, since, limit }: { userId: string; since: number; limit: number }): Promise<{ changes: (Change & { seq: number })[]; next: number; more: boolean }> => {
+export const pullChanges = async ({ scope, since, limit }: { scope: string; since: number; limit: number }): Promise<{ changes: (Change & { seq: number })[]; next: number; more: boolean }> => {
   const rows = await mgDb.select({
     tbl: syncRecords.tbl,
     id: syncRecords.id,
@@ -62,7 +62,7 @@ export const pullChanges = async ({ userId, since, limit }: { userId: string; si
     seq: syncRecords.seq
   })
     .from(syncRecords)
-    .where(and(eq(syncRecords.userId, userId), gt(syncRecords.seq, since)))
+    .where(and(eq(syncRecords.scope, scope), gt(syncRecords.seq, since)))
     .orderBy(asc(syncRecords.seq))
     .limit(limit + 1);
   const changes = rows.slice(0, limit);

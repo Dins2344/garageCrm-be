@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
+import { eq } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import app from '../../app';
 import logger from '../../utils/logger';
@@ -13,8 +14,10 @@ import { wrapKey, unwrapKey, newDataKey } from '../services/crypto';
 vi.mock('../services/google', () => ({
   verifyGoogleIdToken: vi.fn(async (idToken: string) => {
     if (idToken === 'bad') throw new HttpError('Google sign-in failed. Try again.', 401);
-    if (idToken === 'other') return { sub: 'g-2', email: 'b@example.com' };
-    return { sub: 'g-1', email: 'a@example.com' };
+    if (idToken === 'other') return { sub: 'g-2', email: 'b@example.com', name: null };
+    if (idToken === 'named') return { sub: 'g-3', email: 'c@example.com', name: 'Dinson' };
+    if (idToken === 'renamed') return { sub: 'g-3', email: 'c@example.com', name: 'Dinson D' };
+    return { sub: 'g-1', email: 'a@example.com', name: null };
   })
 }));
 
@@ -46,6 +49,13 @@ describe('MyGarage auth', () => {
     const b = await signIn();
     expect(b.body.user.id).toBe(a.body.user.id);
     expect(await mgDb.select().from(users)).toHaveLength(1);
+  });
+
+  it('sign-in stores and updates the Google name', async () => {
+    await signIn('named');
+    expect((await mgDb.select().from(users).where(eq(users.googleSub, 'g-3')))[0].name).toBe('Dinson');
+    await signIn('renamed');
+    expect((await mgDb.select().from(users).where(eq(users.googleSub, 'g-3')))[0].name).toBe('Dinson D');
   });
 
   it('rejects a bad Google token', async () => {

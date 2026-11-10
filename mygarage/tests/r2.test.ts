@@ -10,24 +10,28 @@ beforeAll(() => setMyGarageEnv(TEST_ENV));
 afterAll(() => setMyGarageEnv(null));
 
 describe('r2 service', () => {
-  it('objectKey builds u/<user>/<file> and refuses anything that could escape it', () => {
+  it('objectKey builds u/ and g/ keys and rejects anything else', () => {
     const user = newId();
-    expect(objectKey(user, FILE)).toBe(`u/${user}/${FILE}`);
-    expect(() => objectKey(user, '../x')).toThrow();
-    expect(() => objectKey(user, `../${newId()}/${FILE}`)).toThrow();
-    expect(() => objectKey(user, '../..')).toThrow();
-    expect(() => objectKey('../x', FILE)).toThrow();
-    expect(() => objectKey('not-hex', FILE)).toThrow();
+    const garage = '0190a1b2-c3d4-7e5f-8a6b-aaaaaaaaaaaa';
+    expect(objectKey(`u:${user}`, FILE)).toBe(`u/${user}/${FILE}`);
+    expect(objectKey(`g:${garage}`, FILE)).toBe(`g/${garage}/${FILE}`);
+    expect(() => objectKey('g:../x', FILE)).toThrow();
+    expect(() => objectKey(`u:${user}`, '../x')).toThrow();
+    expect(() => objectKey(`u:${user}`, `../${newId()}/${FILE}`)).toThrow();
+    expect(() => objectKey('u:../x', FILE)).toThrow();
+    expect(() => objectKey('u:not-hex', FILE)).toThrow();
+    expect(() => objectKey(`g:${user}`, FILE)).toThrow();
+    expect(() => objectKey(user, FILE)).toThrow();
   });
 
   it('presignPut signs host and content-length, and a 900 second expiry', async () => {
-    const url = new URL(await presignPut(objectKey(newId(), FILE), 900, 1234));
+    const url = new URL(await presignPut(objectKey(`u:${newId()}`, FILE), 900, 1234));
     expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toEqual(['content-length', 'host']);
     expect(url.searchParams.get('X-Amz-Expires')).toBe('900');
   });
 
   it('presignGet signs host only', async () => {
-    const url = new URL(await presignGet(objectKey(newId(), FILE), 900));
+    const url = new URL(await presignGet(objectKey(`u:${newId()}`, FILE), 900));
     expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('host');
   });
 
@@ -40,8 +44,8 @@ describe('r2 service', () => {
     }));
     vi.stubGlobal('fetch', hang);
     try {
-      await expect(headObjectSize(objectKey(newId(), FILE))).rejects.toThrow();
-      await expect(deleteObject(objectKey(newId(), FILE))).rejects.toThrow();
+      await expect(headObjectSize(objectKey(`u:${newId()}`, FILE))).rejects.toThrow();
+      await expect(deleteObject(objectKey(`u:${newId()}`, FILE))).rejects.toThrow();
       expect(timeout).toHaveBeenCalledWith(10_000);
       expect(hang).toHaveBeenCalledTimes(2); // retries: 2 would retry a rejected fetch only on 5xx, never on abort
     } finally {

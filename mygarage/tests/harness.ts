@@ -35,7 +35,7 @@ export const useMyGarageDb = (): void => {
     await authStore.resetAll();
     await authSessionStore.resetAll();
     await userStore.resetAll();
-    await pglite.exec('TRUNCATE TABLE users, refresh_tokens, sync_records, cloud_files CASCADE');
+    await pglite.exec('TRUNCATE TABLE users, refresh_tokens, sync_records, cloud_files, shared_garages, garage_members, garage_invites CASCADE');
   });
 
   afterAll(async () => {

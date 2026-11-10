@@ -20,10 +20,13 @@ const objectUrl = (key: string): string => {
   return `https://${accountId}.r2.cloudflarestorage.com/${bucket}/${key}`;
 };
 
-/** Every R2 caller builds its key here, so a crafted id can never reach another user's object or the bucket root. */
-export const objectKey = (userId: string, fileId: string): string => {
-  if (!isObjectIdHex(userId) || !isFileId(fileId)) throw new Error('Invalid object key parts');
-  return `u/${userId}/${fileId}`;
+/** Every R2 caller builds its key here, so a crafted id can never reach another scope's object or the bucket root. */
+export const objectKey = (scope: string, fileId: string): string => {
+  const owner = scope.slice(2);
+  if (!isFileId(fileId)) throw new Error('Invalid object key parts');
+  if (scope.startsWith('u:') && isObjectIdHex(owner)) return `u/${owner}/${fileId}`;
+  if (scope.startsWith('g:') && isFileId(owner)) return `g/${owner}/${fileId}`;
+  throw new Error('Invalid object key parts');
 };
 
 const presign = async (method: 'PUT' | 'GET', key: string, ttlSeconds: number, headers?: Record<string, string>): Promise<string> =>
