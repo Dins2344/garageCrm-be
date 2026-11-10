@@ -1,4 +1,4 @@
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { and, eq, gt, ne, sql } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { garageInvites, garageMembers, users } from '../config/schema';
 import { hashToken, newRefreshToken } from '../services/crypto';
@@ -105,14 +105,21 @@ const requireInvitee = async (userId: string, row: Invite): Promise<void> => {
   if ((await emailOf(userId)) !== row.email) throw new HttpError(wrongAccount(row.email), 403);
 };
 
-const accept = async (userId: string, row: Invite): Promise<{ garageId: string; role: Role }> => {
+const accept = async (userId: string, row: Invite, tokenHash?: string): Promise<{ garageId: string; role: Role }> => {
   if (row.status !== 'pending') throw new HttpError(INVITE_GONE, 404);
   await requireInvitee(userId, row);
   if (Date.now() >= row.expiresAt.getTime()) throw new HttpError(expired(row.inviterName), 410);
   return mgDb.transaction(async (tx) => {
+    // Via a link the claim also matches the presented token, so a resend landing in between kills the old one.
     const [claimed] = await tx.update(garageInvites).set({ status: 'accepted' })
-      .where(and(eq(garageInvites.id, row.id), eq(garageInvites.status, 'pending'))).returning({ id: garageInvites.id });
+      .where(and(eq(garageInvites.id, row.id), eq(garageInvites.status, 'pending'), tokenHash ? eq(garageInvites.tokenHash, tokenHash) : undefined))
+      .returning({ id: garageInvites.id });
     if (!claimed) throw new HttpError(INVITE_GONE, 404);
+    if (!(await roleIn(userId, row.garageId, tx))) {
+      const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(garageMembers)
+        .where(and(eq(garageMembers.garageId, row.garageId), ne(garageMembers.role, 'owner')));
+      if (n >= MAX_PEOPLE) throw new HttpError(GARAGE_FULL, 409); // rolls the claim back, the invite stays pending
+    }
     await tx.insert(garageMembers).values({ garageId: row.garageId, userId, role: row.role }).onConflictDoNothing();
     const role = (await roleIn(userId, row.garageId, tx)) as Role;
     return { garageId: row.garageId, role };
@@ -125,7 +132,7 @@ export const acceptInvite = async ({ userId, inviteId }: { userId: string; invit
 export const acceptByToken = async ({ userId, token }: { userId: string; token: string }) => {
   const [row] = await mgDb.select().from(garageInvites).where(eq(garageInvites.tokenHash, hashToken(token)));
   if (!row) throw new HttpError(INVITE_GONE, 404);
-  return accept(userId, row);
+  return accept(userId, row, hashToken(token));
 };
 
 export const declineInvite = async ({ userId, inviteId }: { userId: string; inviteId: string }): Promise<void> => {

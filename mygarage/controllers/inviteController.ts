@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Request, Response } from 'express';
 import * as invites from '../usecases/inviteUsecase';
 import { garageIdSchema } from '../models/Garage';
@@ -42,6 +43,9 @@ export const acceptLink = async (req: Request, res: Response): Promise<void> => 
   res.json({ success: true, data: await invites.acceptByToken({ userId: me(res), token: body.data.token }) });
 };
 
+// One script for every token, so a CSP hash can allow it without 'unsafe-inline'. helmet's default blocks inline scripts.
+const SCRIPT = "location.replace(document.querySelector('a').href);";
+const CSP = `default-src 'none'; script-src 'sha256-${crypto.createHash('sha256').update(SCRIPT).digest('base64')}'; style-src 'unsafe-inline'`;
 const PLAY = 'https://play.google.com/store/apps/details?id=com.dctechs.mygarage';
 const page = (body: string): string =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>MyGarage invite</title>` +
@@ -50,7 +54,7 @@ const page = (body: string): string =>
 
 /** Public and does no lookup: the token is only forwarded to the app, which asks the server as the signed-in user. */
 export const linkPage = (req: Request, res: Response): void => {
-  res.set('Referrer-Policy', 'no-referrer');
+  res.set({ 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': CSP });
   const token = String(req.params.token);
   if (!TOKEN_PATTERN.test(token)) {
     res.status(404).type('html').send(page('<h1>Invite not found</h1><p>This invite link is not valid.</p>'));
@@ -59,6 +63,6 @@ export const linkPage = (req: Request, res: Response): void => {
   const url = `intent://invite/${token}#Intent;scheme=mygarage;package=com.dctechs.mygarage;S.browser_fallback_url=${encodeURIComponent(PLAY)};end`;
   res.type('html').send(page(
     `<h1>You have a MyGarage invite</h1><p>Open it on your Android phone with the Google account it was sent to.</p>` +
-    `<a href="${url}">Open in MyGarage</a><script>location.replace(${JSON.stringify(url)});</script>`
+    `<a href="${url}">Open in MyGarage</a><script>${SCRIPT}</script>`
   ));
 };

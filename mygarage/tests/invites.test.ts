@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import crypto from 'crypto';
 import request from 'supertest';
 import { eq } from 'drizzle-orm';
 import app from '../../app';
@@ -180,6 +181,22 @@ describe('MyGarage invites', () => {
     expect(await memberIds()).not.toContain(anu.user.id);
   });
 
+  it('accept refuses a garage that already has 10 people and leaves the invite pending', async () => {
+    const { owner, anu } = await setup();
+    await invite(owner.accessToken);
+    for (let i = 0; i < 10; i++) {
+      const u = await sign(`m${i}`);
+      await testDb.insert(garageMembers).values({ garageId: G, userId: u.user.id, role: 'viewer' });
+    }
+    const id = (await testDb.select().from(garageInvites))[0].id;
+    for (const res of [
+      await call('post', `/invites/${id}/accept`, anu.accessToken),
+      await call('post', '/invites/accept-link', anu.accessToken).send({ token: tokenOf() })
+    ]) expect([res.status, res.body.message]).toEqual([409, 'This garage already has 10 people.']);
+    expect(await memberIds()).not.toContain(anu.user.id);
+    expect(await testDb.select().from(garageInvites)).toMatchObject([{ status: 'pending' }]);
+  });
+
   it('resend issues a new token and 12 more hours', async () => {
     const { owner, anu } = await setup();
     const id = (await invite(owner.accessToken)).body.data.id;
@@ -214,6 +231,10 @@ describe('MyGarage invites', () => {
     const play = encodeURIComponent('https://play.google.com/store/apps/details?id=com.dctechs.mygarage');
     expect(res.text).toContain(`intent://invite/${token}#Intent;scheme=mygarage;package=com.dctechs.mygarage;S.browser_fallback_url=${play};end`);
     expect(res.text).toContain('Open in MyGarage');
+    const script = /<script>([\s\S]*?)<\/script>/.exec(res.text)![1];
+    expect(script).not.toContain(token);
+    const hash = crypto.createHash('sha256').update(script).digest('base64');
+    expect(res.headers['content-security-policy']).toContain(`script-src 'sha256-${hash}'`);
     expect((await request(app).get('/api/mygarage/invite/short')).status).toBe(404);
     expect((await request(app).get(`/api/mygarage/invite/${'A'.repeat(42)}!`)).status).toBe(404);
   });
