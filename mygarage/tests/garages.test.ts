@@ -153,6 +153,16 @@ describe('MyGarage shared garages', () => {
     expect((await api('get', `/${G}/key`, b.accessToken)).status).toBe(403);
   });
 
+  it('after deleteGarage no sync row of the scope remains and the former owner pulls none', async () => {
+    const { a, b } = await setup();
+    await seedScope(a.user.id, b.user.id);
+    expect((await api('delete', `/${G}`, a.accessToken)).status).toBe(200);
+    expect(await testDb.select().from(syncRecords).where(eq(syncRecords.scope, `g:${G}`))).toHaveLength(0);
+    const pull = await request(app).post('/api/mygarage/v2/sync/pull').set(authHeader(a.accessToken)).send({ cursors: { [G]: 0 } });
+    expect(pull.status).toBe(200);
+    expect(pull.body.data.changes).toEqual([]);
+  });
+
   it('deleteGarage keeps everything and answers 502 when an R2 delete fails', async () => {
     const { a, b } = await setup();
     await seedScope(a.user.id, b.user.id);

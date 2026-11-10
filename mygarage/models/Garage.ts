@@ -11,3 +11,7 @@ export const OWNER_FIXED = 'The garage owner cannot be changed or removed. Delet
 export const garageIdSchema = z.string().refine(isFileId);
 export const memberIdSchema = z.string().min(1).max(64);
 export const roleSchema = z.object({ role: z.enum(['editor', 'viewer']) });
+export const releaseSchema = z.object({
+  records: z.array(z.object({ tbl: z.string().min(1).max(64), id: z.string().min(1).max(64) })).max(500),
+  fileIds: z.array(z.string().uuid()).max(100)
+});

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import * as garages from '../usecases/garageUsecase';
-import { GARAGE_BAD_INPUT, garageIdSchema, memberIdSchema, roleSchema } from '../models/Garage';
+import { GARAGE_BAD_INPUT, garageIdSchema, memberIdSchema, releaseSchema, roleSchema } from '../models/Garage';
 import { HttpError } from '../../utils/httpError';
 
 const bad = (): never => {
@@ -41,4 +41,9 @@ export const removeMember = async (req: Request, res: Response): Promise<void> =
 export const remove = async (req: Request, res: Response): Promise<void> => {
   await garages.deleteGarage({ userId: me(res), garageId: garageId(req) });
   res.json({ success: true });
+};
+export const release = async (req: Request, res: Response): Promise<void> => {
+  const body = releaseSchema.safeParse(req.body);
+  if (!body.success) return bad();
+  res.json({ success: true, data: await garages.releasePersonal({ userId: me(res), garageId: garageId(req), ...body.data }) });
 };

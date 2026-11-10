@@ -126,7 +126,7 @@ export const requestDownload = async ({ userId, scope, fileId }: { userId: strin
 };
 
 /** Object first, row second: a failure leaves the row, which the next upload request cleans up. */
-export const removeCloudFile = async ({ scope, fileId }: { userId?: string; scope: string; fileId: string }): Promise<void> => {
+export const removeCloudFile = async ({ scope, fileId }: { scope: string; fileId: string }): Promise<void> => {
   await r2.deleteObject(r2.objectKey(scope, fileId));
   await mgDb.delete(cloudFiles).where(and(eq(cloudFiles.scope, scope), eq(cloudFiles.fileId, fileId)));
 };

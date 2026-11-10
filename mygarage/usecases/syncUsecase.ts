@@ -53,7 +53,7 @@ const storeGroups = async (userId: string, groups: Map<string, Change[]>): Promi
         continue;
       }
       try {
-        await removeCloudFile({ userId, scope, fileId: change.id });
+        await removeCloudFile({ scope, fileId: change.id });
       } catch {
         log.error('Cloud file removal failed', { userId, fileId: change.id });
       }

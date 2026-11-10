@@ -40,12 +40,16 @@ router.post('/files/:fileId/complete', refuseIfSharing, files.complete);
 router.get('/files/:fileId/download-url', refuseIfSharing, files.downloadUrl);
 router.post('/v2/sync/push', sync.pushV2);
 router.post('/v2/sync/pull', sync.pullV2);
+router.post('/v2/files/:scope/:fileId/upload-url', files.uploadUrlV2);
+router.post('/v2/files/:scope/:fileId/complete', files.completeV2);
+router.get('/v2/files/:scope/:fileId/download-url', files.downloadUrlV2);
 router.get('/v2/garages', garages.list);
 router.post('/v2/garages/:garageId/share', garages.share);
 router.get('/v2/garages/:garageId/key', garages.key);
 router.get('/v2/garages/:garageId/people', garages.people);
 router.patch('/v2/garages/:garageId/members/:memberId', garages.setRole);
 router.delete('/v2/garages/:garageId/members/:memberId', garages.removeMember);
+router.post('/v2/garages/:garageId/release', garages.release);
 router.delete('/v2/garages/:garageId', garages.remove);
 
 router.use(mgErrorHandler);

@@ -1,10 +1,11 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { getMyGarageEnv } from '../config/env';
 import { cloudFiles, garageInvites, garageMembers, sharedGarages, syncRecords, users } from '../config/schema';
 import { newDataKey, unwrapKey, wrapKey } from '../services/crypto';
 import { deleteObject, objectKey } from '../services/r2';
-import { garageScope } from '../services/scope';
+import { garageScope, personalScope } from '../services/scope';
+import { removeCloudFile } from './fileUsecase';
 import { NO_ACCESS, NOT_A_MEMBER, OWNER_FIXED, OWNER_ONLY, TAKEN } from '../models/Garage';
 import { HttpError } from '../../utils/httpError';
 import logger from '../../utils/logger';
@@ -26,13 +27,13 @@ export const readableGarageIds = async (userId: string): Promise<string[]> =>
 export const isInAnyGarage = async (userId: string): Promise<boolean> =>
   (await mgDb.select({ id: garageMembers.garageId }).from(garageMembers).where(eq(garageMembers.userId, userId)).limit(1)).length > 0;
 
-const requireMember = async (userId: string, garageId: string): Promise<Role> => {
+export const requireMember = async (userId: string, garageId: string): Promise<Role> => {
   const role = await roleIn(userId, garageId);
   if (!role) throw new HttpError(NO_ACCESS, 403);
   return role;
 };
 
-const requireOwner = async (userId: string, garageId: string): Promise<void> => {
+export const requireOwner = async (userId: string, garageId: string): Promise<void> => {
   if ((await requireMember(userId, garageId)) !== 'owner') throw new HttpError(OWNER_ONLY, 403);
 };
 
@@ -110,12 +111,51 @@ export const deleteSharedGarage = async ({ garageId }: { garageId: string }): Pr
       throw new HttpError('Could not delete the garage files. Try again.', 502);
     }
   }
-  await mgDb.delete(syncRecords).where(eq(syncRecords.scope, scope));
-  await mgDb.delete(sharedGarages).where(eq(sharedGarages.id, garageId));
+  // Same lock key as a push to this scope, so a racing push cannot leave rows behind the garage.
+  await mgDb.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${scope}))`);
+    await tx.delete(syncRecords).where(eq(syncRecords.scope, scope));
+    await tx.delete(sharedGarages).where(eq(sharedGarages.id, garageId));
+  });
   log.info('Garage deleted', { garageId, files: files.length });
 };
 
 export const deleteGarage = async ({ userId, garageId }: { userId: string; garageId: string }): Promise<void> => {
   await requireOwner(userId, garageId);
   await deleteSharedGarage({ garageId });
+};
+
+/** After converting to a shared garage: drop the owner's personal copies that now exist in the garage. */
+export const releasePersonal = async ({ userId, garageId, records, fileIds }: {
+  userId: string; garageId: string; records: { tbl: string; id: string }[]; fileIds: string[];
+}): Promise<{ released: number; kept: number }> => {
+  await requireOwner(userId, garageId);
+  const mine = personalScope(userId);
+  const theirs = garageScope(garageId);
+  let released = 0;
+  const byTable = new Map<string, string[]>();
+  for (const { tbl, id } of records) byTable.set(tbl, [...(byTable.get(tbl) ?? []), id]);
+  for (const [tbl, ids] of byTable) {
+    const inGarage = (await mgDb.select({ id: syncRecords.id }).from(syncRecords)
+      .where(and(eq(syncRecords.scope, theirs), eq(syncRecords.tbl, tbl), inArray(syncRecords.id, ids)))).map((r) => r.id);
+    if (!inGarage.length) continue;
+    released += (await mgDb.delete(syncRecords)
+      .where(and(eq(syncRecords.scope, mine), eq(syncRecords.tbl, tbl), inArray(syncRecords.id, inGarage))).returning({ id: syncRecords.id })).length;
+  }
+  const files = new Set(fileIds);
+  for (const fileId of files) {
+    const [copy] = await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles)
+      .where(and(eq(cloudFiles.scope, theirs), eq(cloudFiles.fileId, fileId), eq(cloudFiles.status, 'uploaded')));
+    if (!copy) continue;
+    const [own] = await mgDb.select({ fileId: cloudFiles.fileId }).from(cloudFiles)
+      .where(and(eq(cloudFiles.scope, mine), eq(cloudFiles.fileId, fileId)));
+    if (!own) continue;
+    try {
+      await removeCloudFile({ scope: mine, fileId });
+      released++;
+    } catch {
+      log.error('Personal file release failed', { userId, garageId, fileId });
+    }
+  }
+  return { released, kept: records.length + files.size - released };
 };
