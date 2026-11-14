@@ -8,7 +8,6 @@ import cookieParser from 'cookie-parser';
 import os from 'os';
 import swaggerUi from 'swagger-ui-express';
 
-import { pingDb } from './config/db';
 import errorHandler from './middleware/errorHandler';
 import logger from './utils/logger';
 import swaggerSpec from './config/swagger';
@@ -114,12 +113,13 @@ app.use('/api/meta', metaRoutes);     // No auth — static reference data
 app.use('/api/public', publicRoutes); // No auth — token-secured
 app.use('/api/admin', adminRoutes);   // Platform-wide admin
 
-// Health check
-app.get('/api/health', async (_req, res) => {
+// Health check — liveness only. Deliberately no DB query: Docker polls this
+// every 30s, and a query that often keeps Neon's compute from ever scaling to
+// zero (it burned the free plan's monthly CU-hours in two weeks). The DB check
+// lives on /api/admin/health.
+app.get('/api/health', (_req, res) => {
   const memUsage = process.memoryUsage();
   const formatMB = (bytes: number) => (bytes / 1024 / 1024).toFixed(2) + ' MB';
-
-  const dbReachable = await pingDb();
 
   res.json({
     success: true,
@@ -145,9 +145,6 @@ app.get('/api/health', async (_req, res) => {
       node: process.version,
       os: `${os.type()} ${os.release()}`,
       arch: os.arch()
-    },
-    database: {
-      status: dbReachable ? 'connected' : 'disconnected'
     },
     environment: process.env.NODE_ENV || 'development'
   });

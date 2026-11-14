@@ -1081,7 +1081,7 @@
  *     tags: [Health]
  *     summary: System health check
  *     security: []
- *     description: Returns server uptime, memory, CPU, DB status, and platform info
+ *     description: Liveness only - uptime, memory, CPU and platform info. Does not touch the database (so it cannot keep Neon awake); the DB check is on /admin/health.
  *     responses:
  *       200:
  *         description: System health info
@@ -1108,13 +1108,6 @@
  *                   type: object
  *                 cpu:
  *                   type: object
- *                 database:
- *                   type: object
- *                   properties:
- *                     status:
- *                       type: string
- *                     host:
- *                       type: string
  *                 environment:
  *                   type: string
  */
