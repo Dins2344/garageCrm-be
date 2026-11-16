@@ -2529,6 +2529,25 @@
  *                     key: { type: string, description: base64 of 32 bytes }
  *       401:
  *         description: Session ended
+ * /mygarage/v2/app/version:
+ *   get:
+ *     tags: [MyGarage]
+ *     summary: Which app builds must update before use
+ *     description: Public and database-free. Set by MYGARAGE_MIN_VERSION_CODE and MYGARAGE_BLOCKED_VERSION_CODES.
+ *     responses:
+ *       200:
+ *         description: The rule
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     minVersionCode: { type: integer, example: 9 }
+ *                     blockedVersionCodes: { type: array, items: { type: integer }, example: [11] }
  * /mygarage/v2/billing/entitlement:
  *   get:
  *     tags: [MyGarage]
