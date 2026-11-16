@@ -15,6 +15,13 @@
       "when": 1794309503704,
       "tag": "0001_sharing",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794829166056,
+      "tag": "0002_billing",
+      "breakpoints": true
     }
   ]
 }

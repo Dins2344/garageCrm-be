@@ -6,6 +6,7 @@ import { newDataKey, unwrapKey, wrapKey } from '../services/crypto';
 import { deleteObject, objectKey } from '../services/r2';
 import { garageScope, personalScope } from '../services/scope';
 import { removeCloudFile } from './fileUsecase';
+import { requirePlus } from './billingUsecase';
 import { NO_ACCESS, NOT_A_MEMBER, OWNER_FIXED, OWNER_ONLY, TAKEN } from '../models/Garage';
 import { HttpError } from '../../utils/httpError';
 import logger from '../../utils/logger';
@@ -39,8 +40,11 @@ export const requireOwner = async (userId: string, garageId: string): Promise<vo
 
 const keyOf = (wrapped: string): string => unwrapKey(wrapped, getMyGarageEnv().masterKey).toString('base64');
 
-export const shareGarage = async ({ userId, garageId }: { userId: string; garageId: string }): Promise<{ key: string }> =>
-  mgDb.transaction(async (tx) => {
+export const shareGarage = async ({ userId, garageId }: { userId: string; garageId: string }): Promise<{ key: string }> => {
+  // Only starting to share needs Plus: the app asks again for a garage it already shares, and a lapsed owner must keep syncing it.
+  const [already] = await mgDb.select({ id: sharedGarages.id }).from(sharedGarages).where(eq(sharedGarages.id, garageId));
+  if (!already) await requirePlus(userId);
+  return mgDb.transaction(async (tx) => {
     await tx.insert(sharedGarages)
       .values({ id: garageId, ownerId: userId, wrappedKey: wrapKey(newDataKey(), getMyGarageEnv().masterKey) })
       .onConflictDoNothing();
@@ -49,6 +53,7 @@ export const shareGarage = async ({ userId, garageId }: { userId: string; garage
     await tx.insert(garageMembers).values({ garageId, userId, role: 'owner' }).onConflictDoNothing();
     return { key: keyOf(garage.wrappedKey) };
   });
+};
 
 export const listGarages = async ({ userId }: { userId: string }): Promise<{ garageId: string; role: Role; ownerName: string }[]> => {
   const rows = await mgDb.select({ garageId: garageMembers.garageId, role: garageMembers.role, name: users.name, email: users.email })

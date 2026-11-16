@@ -90,6 +90,15 @@ const options: swaggerJsdoc.Options = {
             user: { $ref: '#/components/schemas/MyGarageUser' }
           }
         },
+        MyGarageEntitlement: {
+          type: 'object',
+          properties: {
+            plus: { type: 'boolean', description: 'An active, in-grace or cancelled-but-paid Google Play subscription' },
+            until: { type: 'string', format: 'date-time', nullable: true, description: 'When the paid time ends (renews or lapses then)' },
+            autoRenew: { type: 'boolean' },
+            adFree: { type: 'boolean', description: 'Plus, or a member of a garage whose owner has Plus' }
+          }
+        },
 
         MyGarageChange: {
           type: 'object',
