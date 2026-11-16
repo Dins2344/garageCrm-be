@@ -1,4 +1,4 @@
-import { bigint, index, integer, pgSequence, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
+import { bigint, boolean, index, integer, pgSequence, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 
@@ -65,3 +65,15 @@ export const garageInvites = pgTable('garage_invites', {
   expiresAt: timestamp({ withTimezone: true }).notNull(),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow()
 }, (t) => [index().on(t.email, t.status), index().on(t.garageId)]);
+
+/** One row per Google Play purchase token, copied from Play's subscriptionsv2 answer (the source of truth). */
+export const subscriptions = pgTable('subscriptions', {
+  purchaseToken: text().primaryKey(), // globally unique; orderId is missing for promo-code purchases
+  userId: text().notNull().references(() => users.id, { onDelete: 'cascade' }),
+  productId: text().notNull(),
+  basePlanId: text(),
+  state: text().notNull(), // Play's subscriptionState, or REVOKED after a refund
+  expiresAt: timestamp({ withTimezone: true }),
+  autoRenew: boolean().notNull().default(false),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow()
+}, (t) => [index().on(t.userId)]);

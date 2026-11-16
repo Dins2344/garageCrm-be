@@ -5,6 +5,7 @@ import * as sync from '../controllers/syncController';
 import * as files from '../controllers/fileController';
 import * as garages from '../controllers/garageController';
 import * as invites from '../controllers/inviteController';
+import * as billing from '../controllers/billingController';
 import { refuseIfSharing } from '../middleware/legacy';
 import { requireUser } from '../middleware/auth';
 import { authLimiter, authSessionLimiter, inviteLimiter, userLimiter } from '../middleware/rateLimit';
@@ -31,6 +32,8 @@ router.use((_req, res, next) => {
 router.post('/auth/google', authLimiter, auth.google);
 router.post('/auth/refresh', authSessionLimiter, auth.refresh);
 router.post('/auth/sign-out', authSessionLimiter, auth.signOut);
+// Google Play's purchase notifications, through Pub/Sub; authenticated by Google's OIDC token, not a user.
+router.post('/v2/billing/notifications', billing.notification);
 
 // Everything below needs a signed-in user.
 router.use(requireUser, userLimiter);
@@ -42,6 +45,8 @@ router.get('/sync/pull', refuseIfSharing, sync.pull);
 router.post('/files/:fileId/upload-url', refuseIfSharing, files.uploadUrl);
 router.post('/files/:fileId/complete', refuseIfSharing, files.complete);
 router.get('/files/:fileId/download-url', refuseIfSharing, files.downloadUrl);
+router.get('/v2/billing/entitlement', billing.entitlement);
+router.post('/v2/billing/verify', billing.verify);
 router.post('/v2/sync/push', sync.pushV2);
 router.post('/v2/sync/pull', sync.pullV2);
 router.post('/v2/files/:scope/:fileId/upload-url', files.uploadUrlV2);

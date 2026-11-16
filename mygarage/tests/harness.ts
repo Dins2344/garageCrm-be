@@ -13,7 +13,9 @@ export const TEST_ENV: MyGarageEnv = {
   jwtSecret: 'mygarage_test_jwt_secret_0123456789abcdef',
   masterKey: Buffer.alloc(32, 7),
   googleWebClientId: 'test-client.apps.googleusercontent.com',
-  r2: { accountId: 'test', accessKeyId: 'test', secretAccessKey: 'test', bucket: 'test' }
+  r2: { accountId: 'test', accessKeyId: 'test', secretAccessKey: 'test', bucket: 'test' },
+  play: { email: 'play@test.iam.gserviceaccount.com', key: 'unused', rtdnAudience: 'https://test/rtdn', rtdnPushEmail: 'push@test.iam.gserviceaccount.com' },
+  requirePlus: false // billing.test.ts turns it on
 };
 
 /** The real in-process database, for tests that wrap it to inject failures. */
@@ -38,7 +40,7 @@ export const useMyGarageDb = (): void => {
     await userStore.resetAll();
     await inviteStore.resetAll();
     resetMailCaps();
-    await pglite.exec('TRUNCATE TABLE users, refresh_tokens, sync_records, cloud_files, shared_garages, garage_members, garage_invites CASCADE');
+    await pglite.exec('TRUNCATE TABLE users, refresh_tokens, sync_records, cloud_files, shared_garages, garage_members, garage_invites, subscriptions CASCADE');
   });
 
   afterAll(async () => {

@@ -2529,6 +2529,84 @@
  *                     key: { type: string, description: base64 of 32 bytes }
  *       401:
  *         description: Session ended
+ * /mygarage/v2/billing/entitlement:
+ *   get:
+ *     tags: [MyGarage]
+ *     summary: Whether the signed-in user has MyGarage Plus and sees ads
+ *     security: [{ MyGarageBearer: [] }]
+ *     responses:
+ *       200:
+ *         description: The entitlement
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { $ref: '#/components/schemas/MyGarageEntitlement' }
+ *       401:
+ *         description: Session ended
+ * /mygarage/v2/billing/verify:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Check a Google Play purchase and tie it to this account
+ *     description: Asks Google Play for the token's state, stores it, acknowledges a new purchase, and returns the entitlement. Also used by Restore purchases.
+ *     security: [{ MyGarageBearer: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [purchaseToken]
+ *             properties:
+ *               purchaseToken: { type: string, maxLength: 1024 }
+ *     responses:
+ *       200:
+ *         description: The entitlement after this purchase
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { $ref: '#/components/schemas/MyGarageEntitlement' }
+ *       400:
+ *         description: Body missing or not valid
+ *       401:
+ *         description: Session ended
+ *       404:
+ *         description: Google Play does not know this purchase
+ *       409:
+ *         description: The purchase belongs to another MyGarage account
+ *       503:
+ *         description: Purchases are not set up, or Google Play failed
+ * /mygarage/v2/billing/notifications:
+ *   post:
+ *     tags: [MyGarage]
+ *     summary: Google Play Real-time Developer Notifications (Pub/Sub push)
+ *     description: Called only by Google Pub/Sub with its OIDC token. Re-reads the purchase from Google Play. 204 for anything handled or unusable; 503 asks Pub/Sub to retry.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               message:
+ *                 type: object
+ *                 properties:
+ *                   data: { type: string, description: base64 JSON of Play's DeveloperNotification }
+ *                   messageId: { type: string }
+ *               subscription: { type: string }
+ *     responses:
+ *       204:
+ *         description: Handled, or not usable (not retried)
+ *       401:
+ *         description: Not Google's push token
+ *       503:
+ *         description: Purchases are not set up or Google Play failed; Pub/Sub retries
  * /mygarage/sync/push:
  *   post:
  *     tags: [MyGarage]

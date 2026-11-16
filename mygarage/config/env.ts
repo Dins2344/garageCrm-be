@@ -8,6 +8,31 @@ export type MyGarageEnv = {
   masterKey: Buffer;
   googleWebClientId: string;
   r2: { accountId: string; accessKeyId: string; secretAccessKey: string; bucket: string };
+  /** Google Play purchases. Null turns only purchases off; sync and sharing keep working. */
+  play: PlaySettings | null;
+  /** Sharing needs MyGarage Plus. Off until the app that sells Plus is on Play, so sharing keeps working for testers. */
+  requirePlus: boolean;
+};
+
+export type PlaySettings = { email: string; key: string; rtdnAudience: string; rtdnPushEmail: string };
+
+const PLAY = ['MYGARAGE_PLAY_SERVICE_ACCOUNT', 'MYGARAGE_RTDN_AUDIENCE', 'MYGARAGE_RTDN_PUSH_EMAIL'] as const;
+
+/** The Play service account key is its JSON file, base64-encoded onto one line. */
+export const loadPlaySettings = (source: NodeJS.ProcessEnv): PlaySettings | null => {
+  const missing = PLAY.find((name) => !source[name]);
+  if (missing) {
+    log.info('MyGarage purchases are off: a setting is missing', { variable: missing });
+    return null;
+  }
+  try {
+    const sa = JSON.parse(Buffer.from(source.MYGARAGE_PLAY_SERVICE_ACCOUNT as string, 'base64').toString('utf8')) as { client_email?: unknown; private_key?: unknown };
+    if (typeof sa.client_email !== 'string' || typeof sa.private_key !== 'string') throw new Error('incomplete key');
+    return { email: sa.client_email, key: sa.private_key, rtdnAudience: source.MYGARAGE_RTDN_AUDIENCE as string, rtdnPushEmail: source.MYGARAGE_RTDN_PUSH_EMAIL as string };
+  } catch {
+    log.warn('MyGarage purchases are off: a setting is invalid', { variable: 'MYGARAGE_PLAY_SERVICE_ACCOUNT' });
+    return null;
+  }
 };
 
 const REQUIRED = [
@@ -56,7 +81,9 @@ export const loadMyGarageEnv = (source: NodeJS.ProcessEnv = process.env): MyGara
       accessKeyId: get('R2_ACCESS_KEY_ID'),
       secretAccessKey: get('R2_SECRET_ACCESS_KEY'),
       bucket: get('R2_BUCKET')
-    }
+    },
+    play: loadPlaySettings(source),
+    requirePlus: source.MYGARAGE_REQUIRE_PLUS === 'true'
   };
 };
 

@@ -1,9 +1,11 @@
 import { and, eq, gt, lt, ne, sql } from 'drizzle-orm';
 import { mgDb } from '../config/db';
-import { garageInvites, garageMembers, users } from '../config/schema';
+import { garageInvites, garageMembers, sharedGarages, users } from '../config/schema';
 import { hashToken, newRefreshToken } from '../services/crypto';
 import { mailerReady, sendInviteMail } from '../services/mailer';
 import { requireOwner, roleIn, Role } from './garageUsecase';
+import { requirePlus } from './billingUsecase';
+import { OWNER_PLUS_ENDED } from '../models/Subscription';
 import {
   ALREADY_INVITED, ALREADY_MEMBER, canonicalEmail, EXPIRED_KEEP_MS, expired, GARAGE_FULL, INVITE_GONE, INVITE_TTL_MS, INVITES_UNAVAILABLE,
   MAX_MAILS_PER_DAY, MAX_MAILS_PER_USER_PER_DAY, MAX_PENDING, MAX_PEOPLE, SELF_INVITE, SEND_FAILED,
@@ -70,6 +72,7 @@ export const createInvite = async ({ userId, garageId, email, role, garageName }
   userId: string; garageId: string; email: string; role: 'editor' | 'viewer'; garageName: string;
 }): Promise<{ id: string; expiresAt: Date }> => {
   await requireOwner(userId, garageId);
+  await requirePlus(userId);
   if (!mailerReady()) throw new HttpError(INVITES_UNAVAILABLE, 503);
   const [owner] = await mgDb.select({ email: users.email, name: users.name }).from(users).where(eq(users.id, userId));
   if (!owner) throw new HttpError(SESSION_ENDED, 401);
@@ -114,6 +117,7 @@ const pendingById = async (inviteId: string): Promise<Invite> => {
 export const resendInvite = async ({ userId, inviteId }: { userId: string; inviteId: string }): Promise<{ expiresAt: Date }> => {
   const row = await pendingById(inviteId);
   await requireOwner(userId, row.garageId);
+  await requirePlus(userId);
   if (!mailerReady()) throw new HttpError(INVITES_UNAVAILABLE, 503);
   reserveMail(userId);
   const token = newRefreshToken();
@@ -155,6 +159,8 @@ const accept = async (userId: string, row: Invite, tokenHash?: string): Promise<
   if (row.status !== 'pending') throw new HttpError(INVITE_GONE, 404);
   await requireInvitee(userId, row);
   if (Date.now() >= row.expiresAt.getTime()) throw new HttpError(expired(row.inviterName), 410);
+  const [garage] = await mgDb.select({ ownerId: sharedGarages.ownerId }).from(sharedGarages).where(eq(sharedGarages.id, row.garageId));
+  if (garage) await requirePlus(garage.ownerId, OWNER_PLUS_ENDED);
   return mgDb.transaction(async (tx) => {
     // Via a link the claim also matches the presented token, so a resend landing in between kills the old one.
     const [claimed] = await tx.delete(garageInvites)
