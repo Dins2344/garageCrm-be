@@ -6,6 +6,7 @@ import * as files from '../controllers/fileController';
 import * as garages from '../controllers/garageController';
 import * as invites from '../controllers/inviteController';
 import * as billing from '../controllers/billingController';
+import * as appInfo from '../controllers/appController';
 import { refuseIfSharing } from '../middleware/legacy';
 import { requireUser } from '../middleware/auth';
 import { authLimiter, authSessionLimiter, inviteLimiter, userLimiter } from '../middleware/rateLimit';
@@ -20,6 +21,8 @@ router.use((_req, res, next) => {
 
 // Needs no database, so it answers even while sync is unavailable.
 router.get('/invite/:token', invites.linkPage);
+// Which app builds must update; also answers while sync is unavailable.
+router.get('/v2/app/version', appInfo.versionRule);
 
 router.use((_req, res, next) => {
   if (!isMyGarageReady()) {
