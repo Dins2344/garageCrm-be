@@ -136,9 +136,11 @@ describe('MyGarage scoped sync', () => {
     const first = await pull(a.accessToken, {}, 3);
     expect(ids(first)).toEqual(['v1', 'p1', 'v2']);
     expect(first.body.data.more).toBe(true);
+    expect(first.body.data.remaining).toBe(1);
     const second = await pull(a.accessToken, first.body.data.cursors, 3);
     expect(ids(second)).toEqual(['p2']);
     expect(second.body.data.more).toBe(false);
+    expect(second.body.data.remaining).toBe(0);
   });
 
   it('personal rows of one user never reach another member', async () => {
