@@ -124,11 +124,16 @@ export const pullChanges = async ({ scope, since, limit }: { scope: string; sinc
   return { changes, next: changes.length ? changes[changes.length - 1].seq : since, more: rows.length > limit };
 };
 
-/** Pulls from 'personal' and every garage the user is in, in seq order. Cursors for other scopes are ignored. */
-export const pullScoped = async ({ userId, cursors, limit }: { userId: string; cursors: Record<string, number>; limit: number }): Promise<{ changes: (Change & { scope: string; seq: number })[]; cursors: Record<string, number>; more: boolean }> => {
+/**
+ * Pulls from 'personal' and every garage the user is in, in seq order. Cursors for other scopes are ignored.
+ * `remaining` counts the changes still to pull after this page, so the app can show how far a restore has got.
+ */
+export const pullScoped = async ({ userId, cursors, limit }: { userId: string; cursors: Record<string, number>; limit: number }): Promise<{ changes: (Change & { scope: string; seq: number })[]; cursors: Record<string, number>; more: boolean; remaining: number }> => {
   const wires = [WIRE_PERSONAL, ...(await readableGarageIds(userId))];
   const out: Record<string, number> = {};
   for (const wire of wires) out[wire] = cursors[wire] ?? 0;
+  const after = (c: Record<string, number>) =>
+    or(...wires.map((wire) => and(eq(syncRecords.scope, wire === WIRE_PERSONAL ? personalScope(userId) : garageScope(wire)), gt(syncRecords.seq, c[wire]))));
   const rows = await mgDb.select({
     scope: syncRecords.scope,
     tbl: syncRecords.tbl,
@@ -139,11 +144,13 @@ export const pullScoped = async ({ userId, cursors, limit }: { userId: string; c
     seq: syncRecords.seq
   })
     .from(syncRecords)
-    .where(or(...wires.map((wire) => and(eq(syncRecords.scope, wire === WIRE_PERSONAL ? personalScope(userId) : garageScope(wire)), gt(syncRecords.seq, out[wire])))))
+    .where(after(out))
     .orderBy(asc(syncRecords.seq))
     .limit(limit + 1);
   const changes = rows.slice(0, limit).map((r) => ({ ...r, scope: toWire(r.scope) }));
   // Ascending seq, so the last row seen per scope is that scope's new cursor.
   for (const c of changes) out[c.scope] = c.seq;
-  return { changes, cursors: out, more: rows.length > limit };
+  const more = rows.length > limit;
+  const remaining = more ? Number((await mgDb.select({ n: sql<number>`count(*)` }).from(syncRecords).where(after(out)))[0]?.n ?? 0) : 0;
+  return { changes, cursors: out, more, remaining };
 };
