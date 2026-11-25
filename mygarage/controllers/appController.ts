@@ -15,5 +15,5 @@ export const parseVersionRule = (source: NodeJS.ProcessEnv): VersionRule => ({
 
 /** Public and database-free, so the app can check it signed out and while sync is unavailable. Read per request: a restart applies a change. */
 export const versionRule = (_req: Request, res: Response): void => {
-  res.json({ success: true, data: parseVersionRule(process.env) });
+  res.json({ success: true, data: { ...parseVersionRule(process.env), referrals: process.env.MYGARAGE_REFERRALS === 'true' } });
 };
