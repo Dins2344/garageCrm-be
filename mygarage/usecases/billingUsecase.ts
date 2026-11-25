@@ -18,7 +18,10 @@ const ACTIVE = new Set(['SUBSCRIPTION_STATE_ACTIVE', 'SUBSCRIPTION_STATE_IN_GRAC
 export const grantsPlus = (state: string, expiresAt: Date | null, now = Date.now()): boolean =>
   ACTIVE.has(state) || (state === 'SUBSCRIPTION_STATE_CANCELED' && expiresAt !== null && expiresAt.getTime() > now);
 
-/** `freeUntil` is the end of referral days not applied as a Play deferral. When those days give the latest end, it equals `until`. */
+/**
+ * `freeUntil` is the end of referral days not applied as a Play deferral, and null while a Play purchase grants Plus,
+ * so the app keeps showing it as paid. When free days alone give the latest end, it equals `until`.
+ */
 export type Entitlement = { plus: boolean; until: string | null; autoRenew: boolean; adFree: boolean; freeUntil: string | null };
 
 const liveRow = async (userId: string): Promise<SubscriptionRow | undefined> =>
@@ -52,7 +55,7 @@ const plusOf = async (userId: string): Promise<{ row: SubscriptionRow | undefine
     if (!until || g.endsAt > until) until = g.endsAt;
   }
   const free = grants.filter((g) => g.deferredToken === null).map((g) => g.endsAt);
-  const freeUntil = free.length ? free.reduce((a, b) => (b > a ? b : a)) : null;
+  const freeUntil = free.length && !row ? free.reduce((a, b) => (b > a ? b : a)) : null;
   return { row, plus: row !== undefined || inGrant, until, freeUntil };
 };
 

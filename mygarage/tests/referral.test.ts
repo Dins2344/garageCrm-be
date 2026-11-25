@@ -201,7 +201,7 @@ describe('activate', () => {
 });
 
 describe('how days are applied', () => {
-  it('stacks after paid time that will not renew', async () => {
+  it('stacks after paid time that will not renew, and is not free-only while paid time runs', async () => {
     const { f } = await pair();
     await playRow(f.user.id, 'SUBSCRIPTION_STATE_CANCELED', false, 10 * DAY);
     expect(await activate(f)).toBe('rewarded');
@@ -210,7 +210,7 @@ describe('how days are applied', () => {
     const e = await entitlement(f);
     expect(e.plus).toBe(true);
     near(e.until, 40 * DAY);
-    expect(e.freeUntil).toBe(e.until);
+    expect(e.freeUntil).toBeNull(); // R11: a live Play row means the app must keep showing Manage in Google Play
     expect(play.getSubscription).not.toHaveBeenCalled();
   });
 
@@ -273,7 +273,9 @@ describe('how days are applied', () => {
     const [g] = await grants(f.user.id);
     expect(g.deferredToken).toBeNull();
     near(g.endsAt.toISOString(), 40 * DAY);
-    near((await entitlement(f)).freeUntil, 40 * DAY);
+    const e = await entitlement(f);
+    near(e.until, 40 * DAY);
+    expect(e.freeUntil).toBeNull();
   });
 
   it('gives a member of a garage owned by someone on free days no ads', async () => {
