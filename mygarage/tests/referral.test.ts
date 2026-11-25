@@ -6,6 +6,7 @@ import { authHeader } from '../../tests/helpers/factories';
 import { testDb, useMyGarageDb, TEST_ENV } from './harness';
 import { garageMembers, plusGrants, referrals, sharedGarages, subscriptions, users } from '../config/schema';
 import { setMyGarageEnv } from '../config/env';
+import { setMgDb, MgDb } from '../config/db';
 import { REFERRAL_CODE_RE } from '../models/Referral';
 import * as play from '../services/play';
 
@@ -147,7 +148,9 @@ describe('activate', () => {
     expect(await grants()).toHaveLength(2);
   });
 
-  it('pays once when two calls race', async () => {
+  // PGlite runs one transaction at a time, so this covers back-to-back calls only. Under Postgres, true concurrency
+  // relies on the conditional UPDATE in activate and the referrer lock; no test here proves that.
+  it('pays once for two calls made together', async () => {
     const { f } = await pair();
     const results = await Promise.all([activate(f), activate(f)]);
     expect(results.sort()).toEqual(['none', 'rewarded']);
@@ -232,6 +235,33 @@ describe('how days are applied', () => {
     const e = await entitlement(f);
     expect(e).toMatchObject({ plus: true, autoRenew: true, freeUntil: null });
     near(e.until, 40 * DAY);
+  });
+
+  it('never defers twice when the step after the deferral fails', async () => {
+    const { f } = await pair();
+    await playRow(f.user.id, 'SUBSCRIPTION_STATE_ACTIVE', true, 10 * DAY);
+    vi.mocked(play.getSubscription).mockResolvedValue({ etag: 'etag-1', lineItems: [{ expiryTime: new Date(Date.now() + 10 * DAY).toISOString() }] });
+    // From the moment Play defers, every database call fails, inside a transaction or not: a lost connection.
+    let lost = false;
+    vi.mocked(play.deferSubscription).mockImplementation(async () => { lost = true; });
+    const cut = <T extends object>(db: T): T => new Proxy(db, {
+      get(target, prop) {
+        if (lost) throw new Error('connection lost');
+        const value = (target as Record<string | symbol, unknown>)[prop];
+        if (prop === 'transaction') return (fn: (tx: object) => unknown) => (value as Function).call(target, (tx: object) => fn(cut(tx)));
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+    });
+    setMgDb(cut(testDb) as MgDb);
+    try {
+      expect(await activate(f)).toBe('rewarded');
+    } finally {
+      lost = false;
+      setMgDb(testDb);
+    }
+    expect(await activate(f)).toBe('none');
+    expect(play.deferSubscription).toHaveBeenCalledOnce();
+    expect((await grants(f.user.id))[0].deferredToken).toBeNull(); // the stacked days stand
   });
 
   it('stacks the days when Play refuses the deferral', async () => {

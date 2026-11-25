@@ -89,58 +89,74 @@ export const redeem = async ({ userId, code, source }: { userId: string; code: s
   return { result: 'pending' };
 };
 
-/**
- * Plus days for one user. An auto-renewing subscriber's next charge is deferred; anyone else, or a subscriber
- * whose deferral fails, gets the days after their paid time and earlier grants.
- */
-export const grantDays = async (tx: Tx, userId: string, days: number, referralId: string): Promise<void> => {
-  const now = new Date();
-  const rows = await tx.select().from(subscriptions).where(eq(subscriptions.userId, userId)).orderBy(desc(subscriptions.expiresAt));
-  const renewing = rows.find((r) => r.state === 'SUBSCRIPTION_STATE_ACTIVE' && r.autoRenew);
-  if (renewing) {
-    let from: Date | null = null;
-    try {
-      const sub = await getSubscription(renewing.purchaseToken);
-      from = sub ? expiryOf(sub) : null;
-      if (!sub?.etag || !from) throw new Error('Play gave no etag or expiry');
-      await deferSubscription(renewing.purchaseToken, sub.etag, days);
-    } catch (e) {
-      from = null;
-      log.warn('Deferral failed; stacking the days instead', { userId, errorName: (e as Error)?.name });
-    }
-    if (from) {
-      await tx.insert(plusGrants).values({
-        userId, reason: 'referral', days, referralId, deferredToken: renewing.purchaseToken, startsAt: from, endsAt: new Date(from.getTime() + days * DAY)
-      });
-      log.info('Plus days deferred the next charge', { userId, days });
-      return;
-    }
-  }
+/** Stacks the days after the user's paid time and earlier grants. Returns the grant's id. */
+export const grantDays = async (tx: Tx, userId: string, days: number, referralId: string): Promise<string> => {
+  const rows = await tx.select().from(subscriptions).where(eq(subscriptions.userId, userId));
   const [last] = await tx.select({ endsAt: plusGrants.endsAt }).from(plusGrants).where(eq(plusGrants.userId, userId)).orderBy(desc(plusGrants.endsAt)).limit(1);
   const paid = rows.filter((r) => grantsPlus(r.state, r.expiresAt)).map((r) => r.expiresAt?.getTime() ?? 0);
-  const startsAt = new Date(Math.max(now.getTime(), ...paid, last?.endsAt.getTime() ?? 0));
-  await tx.insert(plusGrants).values({ userId, reason: 'referral', days, referralId, startsAt, endsAt: new Date(startsAt.getTime() + days * DAY) });
+  const startsAt = new Date(Math.max(Date.now(), ...paid, last?.endsAt.getTime() ?? 0));
+  const [grant] = await tx.insert(plusGrants).values({ userId, reason: 'referral', days, referralId, startsAt, endsAt: new Date(startsAt.getTime() + days * DAY) })
+    .returning({ id: plusGrants.id });
   log.info('Plus days granted', { userId, days });
+  return grant.id;
 };
 
-/** Pays a pending referral once: the update to `rewarded` is the guard, so a second or racing call finds nothing. */
+/**
+ * Runs after the reward is committed, so a retry can never defer twice. For an auto-renewing subscriber, Play
+ * pushes the next charge back and the stacked grant becomes that deferral. Any failure, or a crash before this
+ * runs, leaves the stacked grant: the days are never lost. Never throws.
+ */
+const deferIfRenewing = async (userId: string, grantId: string, days: number): Promise<void> => {
+  let deferred: { token: string; from: Date } | null = null;
+  try {
+    const [renewing] = await mgDb.select().from(subscriptions)
+      .where(and(eq(subscriptions.userId, userId), eq(subscriptions.state, 'SUBSCRIPTION_STATE_ACTIVE'), eq(subscriptions.autoRenew, true)))
+      .orderBy(desc(subscriptions.expiresAt)).limit(1);
+    if (!renewing) return;
+    const sub = await getSubscription(renewing.purchaseToken);
+    const from = sub ? expiryOf(sub) : null;
+    if (!sub?.etag || !from) throw new Error('Play gave no etag or expiry');
+    await deferSubscription(renewing.purchaseToken, sub.etag, days);
+    deferred = { token: renewing.purchaseToken, from };
+  } catch (e) {
+    log.warn('Deferral failed; the days stay stacked', { userId, errorName: (e as Error)?.name });
+    return;
+  }
+  try {
+    await mgDb.update(plusGrants)
+      .set({ deferredToken: deferred.token, startsAt: deferred.from, endsAt: new Date(deferred.from.getTime() + days * DAY) })
+      .where(eq(plusGrants.id, grantId));
+    log.info('Plus days deferred the next charge', { userId, days });
+  } catch (e) {
+    // Play has deferred, but the grant still reads as stacked days: the user gets both. Rare, and in their favour.
+    log.error('Deferral made but the grant was not updated', { userId, errorName: (e as Error)?.name });
+  }
+};
+
+/**
+ * Pays a pending referral once. The update to `rewarded` is the guard, so a second or racing call finds nothing.
+ * Both grants commit as stacked days first; Play deferrals follow outside the transaction.
+ */
 export const activate = async (userId: string): Promise<{ result: 'rewarded' | 'none' }> => {
   if (!getMyGarageEnv().referrals) return { result: 'none' };
-  return mgDb.transaction(async (tx) => {
+  const paid = await mgDb.transaction(async (tx) => {
     const [ref] = await tx.update(referrals).set({ status: 'rewarded', rewardedAt: new Date() })
       .where(and(eq(referrals.refereeId, userId), eq(referrals.status, 'pending'))).returning();
-    if (!ref) return { result: 'none' as const };
-    await grantDays(tx, userId, REWARD_DAYS, ref.id);
+    if (!ref) return null;
+    const grants = [{ userId, grantId: await grantDays(tx, userId, REWARD_DAYS, ref.id) }];
     if (ref.referrerId) {
       // Locks the referrer, so two friends rewarded at once cannot both take the last place under the cap.
       const [referrer] = await tx.select({ id: users.id }).from(users).where(eq(users.id, ref.referrerId)).for('no key update');
       if (referrer && (await referrerGrantsThisYear(tx, referrer.id)) < YEARLY_CAP) {
-        await grantDays(tx, referrer.id, REWARD_DAYS, ref.id);
+        grants.push({ userId: referrer.id, grantId: await grantDays(tx, referrer.id, REWARD_DAYS, ref.id) });
       } else if (referrer) {
         await tx.update(referrals).set({ referrerCapped: true }).where(eq(referrals.id, ref.id));
       }
     }
     log.info('Referral rewarded', { userId, referrerId: ref.referrerId });
-    return { result: 'rewarded' as const };
+    return grants;
   });
+  if (!paid) return { result: 'none' };
+  for (const g of paid) await deferIfRenewing(g.userId, g.grantId, REWARD_DAYS);
+  return { result: 'rewarded' };
 };
