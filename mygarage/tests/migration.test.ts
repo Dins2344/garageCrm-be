@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { sql } from 'drizzle-orm';
 import { MG_MIGRATIONS_FOLDER } from '../config/db';
+import { testDb, useMyGarageDb } from './harness';
 
 const FILE = '0190f0a0-0000-7000-8000-000000000001';
 
@@ -25,4 +27,24 @@ describe('migration 0001', () => {
     expect(files).toEqual([{ scope: 'u:u1', owner_id: 'u1', file_id: FILE, size: 5, status: 'uploaded' }]);
     await db.close();
   }, 60000);
+});
+
+describe('referral tables', () => {
+  useMyGarageDb();
+
+  it('deleting a user removes what is theirs and only unlinks them as a referrer', async () => {
+    const db = testDb;
+    const rows = async (q: string): Promise<unknown[]> => ((await db.execute(sql.raw(q))) as unknown as { rows: unknown[] }).rows;
+    for (const id of ['r', 'f']) await db.execute(sql`insert into users (id, google_sub, email, wrapped_key) values (${id}, ${'sub' + id}, ${id + '@b.c'}, 'k')`);
+    await db.execute(sql`insert into referral_codes (user_id, code) values ('r', 'MG-AAAAA'), ('f', 'MG-BBBBB')`);
+    await db.execute(sql`insert into referrals (id, referrer_id, referee_id, source, status) values ('x', 'r', 'f', 'play', 'rewarded')`);
+    await db.execute(sql`insert into plus_grants (id, user_id, reason, days, starts_at, ends_at, referral_id) values ('g', 'f', 'referral', 30, now(), now(), 'x')`);
+
+    await db.execute(sql`delete from users where id = 'r'`);
+    expect(await rows('select referrer_id from referrals')).toEqual([{ referrer_id: null }]);
+    expect(await rows('select * from referral_codes')).toHaveLength(1);
+
+    await db.execute(sql`delete from users where id = 'f'`);
+    for (const t of ['referral_codes', 'referrals', 'plus_grants']) expect(await rows(`select * from ${t}`)).toHaveLength(0);
+  });
 });

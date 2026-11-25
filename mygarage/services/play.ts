@@ -4,6 +4,7 @@ import { HttpError } from '../../utils/httpError';
 
 export const PACKAGE = 'com.dctechs.mygarage';
 const API = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${PACKAGE}/purchases`;
+const PLAY_TIMEOUT_MS = 10_000;
 export const PURCHASES_OFF = 'Purchases are unavailable right now. Try again later.';
 
 /** The parts of Play's SubscriptionPurchaseV2 we read. */
@@ -11,6 +12,7 @@ export type PlaySubscription = {
   subscriptionState?: string;
   acknowledgementState?: string;
   linkedPurchaseToken?: string;
+  etag?: string;
   externalAccountIdentifiers?: { obfuscatedExternalAccountId?: string };
   lineItems?: { productId?: string; expiryTime?: string; autoRenewingPlan?: { autoRenewEnabled?: boolean }; offerDetails?: { basePlanId?: string } }[];
 };
@@ -20,7 +22,8 @@ const play = (): JWT => {
   const settings = getMyGarageEnv().play;
   if (!settings) throw new HttpError(PURCHASES_OFF, 503);
   if (client?.email !== settings.email) {
-    client = { email: settings.email, jwt: new JWT({ email: settings.email, key: settings.key, scopes: ['https://www.googleapis.com/auth/androidpublisher'] }) };
+    // The timeout covers every Play request and the token fetch; gaxios has none by default.
+    client = { email: settings.email, jwt: new JWT({ email: settings.email, key: settings.key, scopes: ['https://www.googleapis.com/auth/androidpublisher'], transporterOptions: { timeout: PLAY_TIMEOUT_MS } }) };
   }
   return client.jwt;
 };
@@ -43,6 +46,15 @@ export const acknowledge = async (productId: string, purchaseToken: string): Pro
     url: `${API}/subscriptions/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}:acknowledge`,
     method: 'POST',
     data: {}
+  });
+};
+
+/** Pushes the next renewal back by whole days. Play refuses an etag older than its latest answer. */
+export const deferSubscription = async (purchaseToken: string, etag: string, days: number): Promise<void> => {
+  await play().request({
+    url: `${API}/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}:defer`,
+    method: 'POST',
+    data: { deferralContext: { etag, deferDuration: `${days * 86400}s` } }
   });
 };
 

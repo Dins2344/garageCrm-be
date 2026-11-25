@@ -12,6 +12,8 @@ export type MyGarageEnv = {
   play: PlaySettings | null;
   /** Sharing needs MyGarage Plus. Off until the app that sells Plus is on Play, so sharing keeps working for testers. */
   requirePlus: boolean;
+  /** The invite-a-friend program. Off until the app that offers it is on Play. */
+  referrals: boolean;
 };
 
 export type PlaySettings = { email: string; key: string; rtdnAudience: string; rtdnPushEmail: string };
@@ -83,7 +85,8 @@ export const loadMyGarageEnv = (source: NodeJS.ProcessEnv = process.env): MyGara
       bucket: get('R2_BUCKET')
     },
     play: loadPlaySettings(source),
-    requirePlus: source.MYGARAGE_REQUIRE_PLUS === 'true'
+    requirePlus: source.MYGARAGE_REQUIRE_PLUS === 'true',
+    referrals: source.MYGARAGE_REFERRALS === 'true'
   };
 };
 

@@ -77,3 +77,35 @@ export const subscriptions = pgTable('subscriptions', {
   autoRenew: boolean().notNull().default(false),
   updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow()
 }, (t) => [index().on(t.userId)]);
+
+/** One invite code per account. It never changes. */
+export const referralCodes = pgTable('referral_codes', {
+  userId: text().primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  code: text().notNull().unique(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow()
+});
+
+/** One row per friend who redeemed a code. Deleting the referrer keeps the row, so the friend's reward stands. */
+export const referrals = pgTable('referrals', {
+  id: text().primaryKey().$defaultFn(() => randomUUID()),
+  referrerId: text().references(() => users.id, { onDelete: 'set null' }),
+  refereeId: text().notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
+  source: text({ enum: ['play', 'typed'] }).notNull(),
+  status: text({ enum: ['pending', 'rewarded'] }).notNull(),
+  referrerCapped: boolean().notNull().default(false),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  rewardedAt: timestamp({ withTimezone: true })
+}, (t) => [index().on(t.referrerId)]);
+
+/** Free Plus time. Paid time lives in subscriptions. */
+export const plusGrants = pgTable('plus_grants', {
+  id: text().primaryKey().$defaultFn(() => randomUUID()),
+  userId: text().notNull().references(() => users.id, { onDelete: 'cascade' }),
+  reason: text({ enum: ['referral'] }).notNull(),
+  days: integer().notNull(),
+  startsAt: timestamp({ withTimezone: true }).notNull(),
+  endsAt: timestamp({ withTimezone: true }).notNull(),
+  referralId: text().references(() => referrals.id, { onDelete: 'set null' }),
+  deferredToken: text(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow()
+}, (t) => [index().on(t.userId)]);
