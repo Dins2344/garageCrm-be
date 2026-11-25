@@ -1,7 +1,7 @@
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, ne, sql } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { getMyGarageEnv } from '../config/env';
-import { garageMembers, sharedGarages, users } from '../config/schema';
+import { garageMembers, plusGrants, sharedGarages, users } from '../config/schema';
 import { subscriptions, SubscriptionRow, PLUS_NEEDED, PURCHASE_NOT_FOUND, REVOKED, VOIDED_SUBSCRIPTION, WRONG_ACCOUNT } from '../models/Subscription';
 import { acknowledge, getSubscription, PACKAGE, PlaySubscription } from '../services/play';
 import { HttpError } from '../../utils/httpError';
@@ -18,14 +18,45 @@ const ACTIVE = new Set(['SUBSCRIPTION_STATE_ACTIVE', 'SUBSCRIPTION_STATE_IN_GRAC
 export const grantsPlus = (state: string, expiresAt: Date | null, now = Date.now()): boolean =>
   ACTIVE.has(state) || (state === 'SUBSCRIPTION_STATE_CANCELED' && expiresAt !== null && expiresAt.getTime() > now);
 
-export type Entitlement = { plus: boolean; until: string | null; autoRenew: boolean; adFree: boolean };
+/** `freeUntil` is the end of referral days not applied as a Play deferral. When those days give the latest end, it equals `until`. */
+export type Entitlement = { plus: boolean; until: string | null; autoRenew: boolean; adFree: boolean; freeUntil: string | null };
 
 const liveRow = async (userId: string): Promise<SubscriptionRow | undefined> =>
   (await mgDb.select().from(subscriptions).where(eq(subscriptions.userId, userId)))
     .filter((r) => grantsPlus(r.state, r.expiresAt))
     .sort((a, b) => (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
 
-export const isPlus = async (userId: string): Promise<boolean> => (await liveRow(userId)) !== undefined;
+/** The latest expiry across Play's line items, or null when none has one. */
+export const expiryOf = (sub: PlaySubscription): Date | null => {
+  const expiry = Math.max(...(sub.lineItems ?? []).map((i) => Date.parse(i.expiryTime ?? '')).filter(Number.isFinite));
+  return Number.isFinite(expiry) ? new Date(expiry) : null;
+};
+
+/**
+ * Paid time merged with free grants. A grant counts while `now` is inside it, or when it starts later but
+ * follows on from paid time or another counted grant with no gap.
+ */
+const plusOf = async (userId: string): Promise<{ row: SubscriptionRow | undefined; plus: boolean; until: Date | null; freeUntil: Date | null }> => {
+  const now = new Date();
+  const row = await liveRow(userId);
+  const grants = await mgDb.select().from(plusGrants)
+    .where(and(eq(plusGrants.userId, userId), gt(plusGrants.endsAt, now))).orderBy(asc(plusGrants.startsAt));
+  let reach = row?.expiresAt && row.expiresAt > now ? row.expiresAt : now; // covered without a gap up to here
+  let until = row?.expiresAt ?? null;
+  let inGrant = false;
+  for (const g of grants) {
+    // A deferral extends the live subscription itself, even before Play's notification updates our copy of its expiry.
+    if (g.startsAt > reach && !(g.deferredToken !== null && row)) continue;
+    if (g.startsAt <= now) inGrant = true;
+    if (g.endsAt > reach) reach = g.endsAt;
+    if (!until || g.endsAt > until) until = g.endsAt;
+  }
+  const free = grants.filter((g) => g.deferredToken === null).map((g) => g.endsAt);
+  const freeUntil = free.length ? free.reduce((a, b) => (b > a ? b : a)) : null;
+  return { row, plus: row !== undefined || inGrant, until, freeUntil };
+};
+
+export const isPlus = async (userId: string): Promise<boolean> => (await plusOf(userId)).plus;
 
 /** Sharing is the owner's to pay for: everyone in a Plus owner's garage gets no ads. */
 const inPlusGarage = async (userId: string): Promise<boolean> => {
@@ -37,12 +68,13 @@ const inPlusGarage = async (userId: string): Promise<boolean> => {
 };
 
 export const entitlementOf = async ({ userId }: { userId: string }): Promise<Entitlement> => {
-  const row = await liveRow(userId);
+  const { row, plus, until, freeUntil } = await plusOf(userId);
   return {
-    plus: row !== undefined,
-    until: row?.expiresAt?.toISOString() ?? null,
+    plus,
+    until: until?.toISOString() ?? null,
     autoRenew: row?.autoRenew ?? false,
-    adFree: row !== undefined || (await inPlusGarage(userId))
+    adFree: plus || (await inPlusGarage(userId)),
+    freeUntil: freeUntil?.toISOString() ?? null
   };
 };
 
@@ -68,12 +100,11 @@ const claimedBy = async (purchaseToken: string, sub: PlaySubscription): Promise<
 /** Copies Play's answer into our row. A refunded token stays revoked whatever Play says later. An upgrade or resubscribe ends the token it replaced. */
 const save = async (purchaseToken: string, userId: string, sub: PlaySubscription): Promise<SubscriptionRow> => {
   const items = sub.lineItems ?? [];
-  const expiry = Math.max(...items.map((i) => Date.parse(i.expiryTime ?? '')).filter(Number.isFinite));
   const values = {
     productId: items[0]?.productId ?? '',
     basePlanId: items[0]?.offerDetails?.basePlanId ?? null,
     state: sub.subscriptionState ?? 'SUBSCRIPTION_STATE_UNSPECIFIED',
-    expiresAt: Number.isFinite(expiry) ? new Date(expiry) : null,
+    expiresAt: expiryOf(sub),
     autoRenew: items.some((i) => i.autoRenewingPlan?.autoRenewEnabled === true),
     updatedAt: new Date()
   };

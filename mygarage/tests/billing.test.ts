@@ -88,7 +88,7 @@ describe('verify', () => {
     answer(playSays({ owner: a.user.id }));
     const res = await verify(a.accessToken, 'tok-1');
     expect(res.status).toBe(200);
-    expect(res.body.data).toMatchObject({ plus: true, autoRenew: true, adFree: true });
+    expect(res.body.data).toMatchObject({ plus: true, autoRenew: true, adFree: true, freeUntil: null });
     expect(Date.parse(res.body.data.until)).toBeGreaterThan(Date.now());
     expect(play.acknowledge).toHaveBeenCalledExactlyOnceWith('plus', 'tok-1');
     expect(await rows()).toMatchObject([{ purchaseToken: 'tok-1', userId: a.user.id, basePlanId: 'yearly' }]);
@@ -248,7 +248,7 @@ describe('sharing needs Plus', () => {
     expect((await invite(a.accessToken, 'b@example.com')).status).toBe(201);
     const [{ id }] = (await request(app).get(`${BASE}/invites`).set(authHeader(b.accessToken))).body.data.invites;
     expect((await request(app).post(`${BASE}/invites/${id}/accept`).set(authHeader(b.accessToken))).status).toBe(200);
-    expect(await entitlement(b.accessToken)).toMatchObject({ plus: false, adFree: true });
+    expect(await entitlement(b.accessToken)).toMatchObject({ plus: false, adFree: true, freeUntil: null });
   });
 
   it('after the owner lapses: the garage keeps syncing, but no new invites or joins', async () => {

@@ -11,6 +11,7 @@ export type PlaySubscription = {
   subscriptionState?: string;
   acknowledgementState?: string;
   linkedPurchaseToken?: string;
+  etag?: string;
   externalAccountIdentifiers?: { obfuscatedExternalAccountId?: string };
   lineItems?: { productId?: string; expiryTime?: string; autoRenewingPlan?: { autoRenewEnabled?: boolean }; offerDetails?: { basePlanId?: string } }[];
 };
@@ -43,6 +44,15 @@ export const acknowledge = async (productId: string, purchaseToken: string): Pro
     url: `${API}/subscriptions/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(purchaseToken)}:acknowledge`,
     method: 'POST',
     data: {}
+  });
+};
+
+/** Pushes the next renewal back by whole days. Play refuses an etag older than its latest answer. */
+export const deferSubscription = async (purchaseToken: string, etag: string, days: number): Promise<void> => {
+  await play().request({
+    url: `${API}/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}:defer`,
+    method: 'POST',
+    data: { deferralContext: { etag, deferDuration: `${days * 86400}s` } }
   });
 };
 
