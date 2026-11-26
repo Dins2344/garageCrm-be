@@ -3,8 +3,9 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { getMyGarageEnv } from '../config/env';
 import { users, refreshTokens, toApi } from '../models/User';
-import { cloudFiles, sharedGarages, syncRecords } from '../config/schema';
+import { cloudFiles, deletedGoogleAccounts, sharedGarages, syncRecords } from '../config/schema';
 import { deleteSharedGarage } from './garageUsecase';
+import { withdrawOnDelete } from './referralUsecase';
 import { deleteObject, objectKey } from '../services/r2';
 import { verifyGoogleIdToken } from '../services/google';
 import { newDataKey, wrapKey, unwrapKey, newRefreshToken, hashToken } from '../services/crypto';
@@ -106,6 +107,12 @@ export const deleteAccount = async ({ userId }: { userId: string }): Promise<voi
     }
   }
   await mgDb.delete(syncRecords).where(eq(syncRecords.scope, personalScope(userId)));
-  await mgDb.delete(users).where(eq(users.id, userId));
+  const [me] = await mgDb.select({ googleSub: users.googleSub }).from(users).where(eq(users.id, userId));
+  await mgDb.transaction(async (tx) => {
+    await withdrawOnDelete(tx, userId);
+    // Kept so this Google account cannot redeem an invite again; it holds no data.
+    if (me) await tx.insert(deletedGoogleAccounts).values({ subHash: hashToken(me.googleSub) }).onConflictDoNothing();
+    await tx.delete(users).where(eq(users.id, userId));
+  });
   log.info('Account deleted', { userId, files: files.length });
 };

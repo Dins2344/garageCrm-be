@@ -1,9 +1,10 @@
 import { randomInt } from 'crypto';
-import { and, count, desc, eq, gte, isNull, ne, or } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNull, ne, or, sql } from 'drizzle-orm';
 import { mgDb } from '../config/db';
 import { getMyGarageEnv } from '../config/env';
-import { plusGrants, referralCodes, referrals, subscriptions, users } from '../config/schema';
-import { REDEEM_WINDOW_MS, REFERRAL_CODE_RE, REWARD_DAYS, RedeemResult, YEARLY_CAP } from '../models/Referral';
+import { deletedGoogleAccounts, plusGrants, referralCodes, referrals, subscriptions, users } from '../config/schema';
+import { REDEEM_WINDOW_MS, REFERRAL_CODE_RE, REWARD_DAYS, RedeemResult, WITHDRAW_WINDOW_MS, YEARLY_CAP } from '../models/Referral';
+import { hashToken } from '../services/crypto';
 import { deferSubscription, getSubscription, PACKAGE } from '../services/play';
 import { expiryOf, grantsPlus } from './billingUsecase';
 import { HttpError } from '../../utils/httpError';
@@ -29,12 +30,20 @@ export const codeFor = async (userId: string): Promise<string> => {
   throw new Error('No free referral code');
 };
 
-/** No referral as friend yet, and the account is at most 7 days old. */
+/** No referral as friend yet, the account is at most 7 days old, and its Google account has never deleted an account here. */
 const canRedeem = async (userId: string): Promise<boolean> => {
-  const [user] = await mgDb.select({ createdAt: users.createdAt }).from(users).where(eq(users.id, userId));
+  const [user] = await mgDb.select({ createdAt: users.createdAt, googleSub: users.googleSub }).from(users).where(eq(users.id, userId));
+  if (!user || user.createdAt.getTime() < Date.now() - REDEEM_WINDOW_MS) return false;
   const [used] = await mgDb.select({ id: referrals.id }).from(referrals).where(eq(referrals.refereeId, userId)).limit(1);
-  return user !== undefined && used === undefined && user.createdAt.getTime() >= Date.now() - REDEEM_WINDOW_MS;
+  const [deleted] = await mgDb.select({ subHash: deletedGoogleAccounts.subHash }).from(deletedGoogleAccounts)
+    .where(eq(deletedGoogleAccounts.subHash, hashToken(user.googleSub))).limit(1);
+  return used === undefined && deleted === undefined;
 };
+
+/** Grants this user earned as a referrer (join `referrals` on `referralId`). Their own reward as a friend does not count. */
+const earnedAsReferrer = (userId: string) => and(
+  eq(plusGrants.userId, userId), eq(plusGrants.reason, 'referral'), or(isNull(referrals.refereeId), ne(referrals.refereeId, userId))
+);
 
 /**
  * Referral grants this user earned as a referrer this calendar year (UTC). Their own reward as a friend does not count.
@@ -44,10 +53,7 @@ const referrerGrantsThisYear = async (db: Tx | typeof mgDb, userId: string): Pro
   const yearStart = new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1));
   const [{ n }] = await db.select({ n: count() }).from(plusGrants)
     .leftJoin(referrals, eq(referrals.id, plusGrants.referralId))
-    .where(and(
-      eq(plusGrants.userId, userId), eq(plusGrants.reason, 'referral'), gte(plusGrants.createdAt, yearStart),
-      or(isNull(referrals.refereeId), ne(referrals.refereeId, userId))
-    ));
+    .where(and(earnedAsReferrer(userId), gte(plusGrants.createdAt, yearStart)));
   return n;
 };
 
@@ -58,9 +64,11 @@ export type ReferralStatus = { enabled: false } | {
 export const status = async (userId: string): Promise<ReferralStatus> => {
   if (!getMyGarageEnv().referrals) return { enabled: false };
   const code = await codeFor(userId);
-  const [{ joined }] = await mgDb.select({ joined: count() }).from(referrals).where(eq(referrals.referrerId, userId));
-  const [{ rewarded }] = await mgDb.select({ rewarded: count() }).from(referrals)
-    .where(and(eq(referrals.referrerId, userId), eq(referrals.status, 'rewarded'), eq(referrals.referrerCapped, false)));
+  const [{ live }] = await mgDb.select({ live: count() }).from(referrals).where(eq(referrals.referrerId, userId));
+  // Counted from the grants, which outlive a friend who deletes their account; such a grant has lost its referral.
+  const [{ rewarded, linked }] = await mgDb.select({ rewarded: count(), linked: count(plusGrants.referralId) }).from(plusGrants)
+    .leftJoin(referrals, eq(referrals.id, plusGrants.referralId)).where(earnedAsReferrer(userId));
+  const joined = live + rewarded - linked;
   return {
     enabled: true,
     code,
@@ -131,6 +139,28 @@ const deferIfRenewing = async (userId: string, grantId: string, days: number): P
     // Play has deferred, but the grant still reads as stacked days: the user gets both. Rare, and in their favour.
     log.error('Deferral made but the grant was not updated', { userId, errorName: (e as Error)?.name });
   }
+};
+
+/**
+ * Part of account deletion, before the user row goes. A friend who leaves within 5 days of the reward takes the
+ * referrer's days with them, and the referrer's later stacked days move up so no gap is left. Their own days go with
+ * their account anyway.
+ */
+export const withdrawOnDelete = async (tx: Tx, userId: string): Promise<void> => {
+  const [ref] = await tx.select({ id: referrals.id, referrerId: referrals.referrerId }).from(referrals).where(and(
+    eq(referrals.refereeId, userId), eq(referrals.status, 'rewarded'), gte(referrals.rewardedAt, new Date(Date.now() - WITHDRAW_WINDOW_MS))
+  ));
+  if (!ref?.referrerId) return;
+  await tx.select({ id: users.id }).from(users).where(eq(users.id, ref.referrerId)).for('no key update'); // against a reward landing at once
+  // ponytail: days already applied as a Play deferral stay with the referrer; Play cannot bring a charge forward.
+  const [gone] = await tx.delete(plusGrants)
+    .where(and(eq(plusGrants.referralId, ref.id), eq(plusGrants.userId, ref.referrerId), isNull(plusGrants.deferredToken))).returning();
+  if (!gone) return;
+  await tx.update(plusGrants).set({
+    startsAt: sql`${plusGrants.startsAt} - make_interval(days => ${gone.days}::int)`,
+    endsAt: sql`${plusGrants.endsAt} - make_interval(days => ${gone.days}::int)`
+  }).where(and(eq(plusGrants.userId, ref.referrerId), isNull(plusGrants.deferredToken), gte(plusGrants.startsAt, gone.endsAt)));
+  log.info('Referral days withdrawn', { userId, referrerId: ref.referrerId });
 };
 
 /**

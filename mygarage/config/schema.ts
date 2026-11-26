@@ -109,3 +109,9 @@ export const plusGrants = pgTable('plus_grants', {
   deferredToken: text(),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow()
 }, (t) => [index().on(t.userId)]);
+
+/** SHA-256 of each deleted account's Google sub, so the same Google account cannot redeem an invite again. Nothing else is kept. */
+export const deletedGoogleAccounts = pgTable('deleted_google_accounts', {
+  subHash: text().primaryKey(),
+  deletedAt: timestamp({ withTimezone: true }).notNull().defaultNow()
+});
