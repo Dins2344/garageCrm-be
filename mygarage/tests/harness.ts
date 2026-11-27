@@ -41,7 +41,7 @@ export const useMyGarageDb = (): void => {
     await userStore.resetAll();
     await inviteStore.resetAll();
     resetMailCaps();
-    await pglite.exec('TRUNCATE TABLE users, refresh_tokens, sync_records, cloud_files, shared_garages, garage_members, garage_invites, subscriptions, referral_codes, referrals, plus_grants CASCADE');
+    await pglite.exec('TRUNCATE TABLE users, refresh_tokens, sync_records, cloud_files, shared_garages, garage_members, garage_invites, subscriptions, referral_codes, referrals, plus_grants, deleted_google_accounts CASCADE');
   });
 
   afterAll(async () => {

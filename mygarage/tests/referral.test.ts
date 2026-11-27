@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import { and, eq, isNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import app from '../../app';
 import { authHeader } from '../../tests/helpers/factories';
 import { testDb, useMyGarageDb, TEST_ENV } from './harness';
@@ -33,6 +33,7 @@ const codeOf = async (w: Who): Promise<string> => (await status(w)).body.data.co
 const redeem = (w: Who, body: object) => request(app).post(`${BASE}/referral/redeem`).set(authHeader(w.accessToken)).send(body);
 const redeemed = async (w: Who, code: string) => (await redeem(w, { code, source: 'typed' })).body.data?.result;
 const activate = async (w: Who) => (await request(app).post(`${BASE}/referral/activate`).set(authHeader(w.accessToken))).body.data?.result;
+const deleteAccount = (w: Who) => request(app).delete('/api/mygarage/account').set(authHeader(w.accessToken));
 const entitlement = async (w: Who) => (await request(app).get(`${BASE}/billing/entitlement`).set(authHeader(w.accessToken))).body.data;
 const grants = (userId?: string) => testDb.select().from(plusGrants).where(userId ? eq(plusGrants.userId, userId) : undefined);
 const near = (iso: string | null, ms: number) => expect(Math.abs(Date.parse(iso ?? '') - (Date.now() + ms))).toBeLessThan(MIN);
@@ -164,7 +165,7 @@ describe('activate', () => {
     expect(await grants(r.user.id)).toHaveLength(12);
     expect(await grants(f.user.id)).toHaveLength(1);
     expect((await testDb.select().from(referrals))[0].referrerCapped).toBe(true);
-    expect((await status(r)).body.data).toMatchObject({ capLeft: 0, rewarded: 0 });
+    expect((await status(r)).body.data).toMatchObject({ capLeft: 0, rewarded: 12, daysEarned: 360 }); // the capped friend adds nothing
   });
 
   it('a friend’s own reward does not use their cap as a referrer', async () => {
@@ -173,23 +174,51 @@ describe('activate', () => {
     expect((await status(f)).body.data.capLeft).toBe(12);
   });
 
-  it('a friend who deletes and returns can redeem again, but the cap still holds', async () => {
+  it('a Google account that deleted its account cannot redeem again', async () => {
     const { r, f } = await pair();
-    await fillCap(r.user.id, 11);
     expect(await activate(f)).toBe('rewarded');
-    expect(await grants(r.user.id)).toHaveLength(12);
-
-    expect((await request(app).delete('/api/mygarage/account').set(authHeader(f.accessToken))).status).toBe(200);
-    const orphaned = await testDb.select().from(plusGrants).where(and(eq(plusGrants.userId, r.user.id), isNull(plusGrants.referralId)));
-    expect(orphaned).toHaveLength(12); // the earned grant lost its referral but stays
-    expect((await status(r)).body.data.capLeft).toBe(0);
-
+    expect((await deleteAccount(f)).status).toBe(200);
     const back = await sign('f');
     expect(back.user.id).not.toBe(f.user.id);
-    expect(await redeemed(back, await codeOf(r))).toBe('pending');
-    expect(await activate(back)).toBe('rewarded');
-    expect(await grants(r.user.id)).toHaveLength(12);
-    expect(await grants(back.user.id)).toHaveLength(1);
+    expect((await status(back)).body.data.canRedeem).toBe(false);
+    expect(await redeemed(back, await codeOf(r))).toBe('not_eligible');
+  });
+
+  it('a friend who deletes within 5 days takes the referrer’s days, and later days move up', async () => {
+    const { r, f } = await pair();
+    await fillCap(r.user.id, 1); // 30 free days already running
+    expect(await activate(f)).toBe('rewarded');
+    near((await entitlement(r)).until, 60 * DAY);
+    const later = await sign('g');
+    expect(await redeemed(later, await codeOf(r))).toBe('pending');
+    expect(await activate(later)).toBe('rewarded');
+    near((await entitlement(r)).until, 90 * DAY);
+    const capLeft = (await status(r)).body.data.capLeft;
+
+    await testDb.update(referrals).set({ rewardedAt: new Date(Date.now() - 4 * DAY) }).where(eq(referrals.refereeId, f.user.id));
+    expect((await deleteAccount(f)).status).toBe(200);
+    expect(await grants(r.user.id)).toHaveLength(2);
+    const e = await entitlement(r);
+    expect(e.plus).toBe(true);
+    near(e.until, 60 * DAY); // g's days now follow straight on, with no gap
+    expect((await status(r)).body.data).toMatchObject({ capLeft: capLeft + 1 });
+  });
+
+  it('a friend who deletes after 5 days leaves the referrer’s days and counts as they were', async () => {
+    const { r, f } = await pair();
+    expect(await activate(f)).toBe('rewarded');
+    await testDb.update(referrals).set({ rewardedAt: new Date(Date.now() - 6 * DAY) }).where(eq(referrals.refereeId, f.user.id));
+    expect((await deleteAccount(f)).status).toBe(200);
+    expect(await grants(r.user.id)).toHaveLength(1);
+    expect((await status(r)).body.data).toMatchObject({ joined: 1, rewarded: 1, daysEarned: 30, capLeft: 11 });
+  });
+
+  it('days already applied as a Play deferral stay when the friend deletes early', async () => {
+    const { r, f } = await pair();
+    expect(await activate(f)).toBe('rewarded');
+    await testDb.update(plusGrants).set({ deferredToken: 'tok-1' }).where(eq(plusGrants.userId, r.user.id));
+    expect((await deleteAccount(f)).status).toBe(200);
+    expect(await grants(r.user.id)).toHaveLength(1);
   });
 
   it('rewards the friend when the referrer has deleted their account', async () => {
