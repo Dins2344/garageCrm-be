@@ -17,7 +17,7 @@ import logger from '../../utils/logger';
 const log = logger.child('MyGarageAuth');
 
 export const SESSION_ENDED = 'Your session has ended. Sign in again.';
-const REFRESH_DAYS = 90;
+export const REFRESH_DAYS = 90;
 const R2_DELETE_CHUNK = 10;
 
 export type Session = { accessToken: string; refreshToken: string; user: { id: string; email: string } };

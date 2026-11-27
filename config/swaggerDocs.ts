@@ -1987,6 +1987,28 @@
  *         description: Unauthorized
  */
 
+/**
+ * @swagger
+ * /admin/mygarage:
+ *   get:
+ *     tags: [Admin]
+ *     summary: MyGarage figures for the admin console
+ *     description: >
+ *       Counts from the MyGarage database: accounts and activity, sign-ups and
+ *       deletions per day (last 30 days, India time), Plus subscriptions and
+ *       invite grants, invites, backup records per table, cloud files and
+ *       shared garages, and the 25 newest accounts. Records are encrypted on the
+ *       phone, so only counts are available. Returns connected false when
+ *       MyGarage is off on this server.
+ *     security:
+ *       - AdminAuth: []
+ *     responses:
+ *       200:
+ *         description: MyGarage figures, or connected false
+ *       401:
+ *         description: Unauthorized
+ */
+
 // ════════════════════════════════════════
 // META — APP RELEASE
 // ════════════════════════════════════════

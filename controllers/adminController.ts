@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as adminUsecase from '../usecases/adminUsecase';
 import * as appReleaseUsecase from '../usecases/appReleaseUsecase';
+import { getMyGarageStats } from '../mygarage/usecases/adminStatsUsecase';
 import logger from '../utils/logger';
 const log = logger.child('AdminController');
 
@@ -101,4 +102,11 @@ export const updateAppRelease = async (req: Request, res: Response): Promise<voi
     updatedBy: req.admin?.email ?? ''
   });
   res.json({ success: true, data: saved });
+};
+
+// @desc    MyGarage (the consumer app) figures: accounts, Plus, invites, backup, sharing
+// @route   GET /api/admin/mygarage
+export const getMyGarage = async (req: Request, res: Response): Promise<void> => {
+  log.info('Admin MyGarage stats request', { adminEmail: req.admin?.email });
+  res.json({ success: true, data: await getMyGarageStats() });
 };

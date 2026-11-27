@@ -40,6 +40,7 @@ router.delete('/garages/:id', adminController.deleteGarage);
 router.get('/users',   adminController.getUsers);
 router.delete('/users/:id', adminController.deleteUser);
 router.get('/health',  adminController.getHealth);
+router.get('/mygarage', adminController.getMyGarage);
 
 // The first write endpoints on this surface — everything above is read or
 // delete. The `router.use(adminAuth)` above already covers every verb;
